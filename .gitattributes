@@ -1,0 +1,15 @@
+# Enforce consistent line endings
+* text=auto
+
+# Python files use LF
+*.py text eol=lf
+
+# Mark binaries
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+
+# Docs
+*.md text
+docs/* text
