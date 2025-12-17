@@ -190,16 +190,20 @@ class MainWindow:
         
         # 文件选择区
         files_frame = ttk.Frame(self.step1_frame)
-        files_frame.pack(fill="x", pady=20)
+        files_frame.pack(fill="both", expand=True, pady=10)
         
         # 手工表卡片（增强卡片感：边框、阴影效果）
-        manual_card = ttk.Frame(files_frame, padding=20, bootstyle="primary", relief="raised", borderwidth=2)
+        manual_card = ttk.Frame(files_frame, padding=25, bootstyle="info", relief="raised", borderwidth=2)
         if self._is_narrow_mode():
-            manual_card.pack(side="top", fill="both", expand=True, padx=10, pady=(0, 10))
+            manual_card.pack(side="top", fill="both", expand=True, padx=5, pady=(0, 15))
         else:
-            manual_card.pack(side="left", fill="both", expand=True, padx=10)
+            manual_card.pack(side="left", fill="both", expand=True, padx=8)
         
-        ttk.Label(manual_card, text="📄 手工表", font=("", 11, "bold")).pack(pady=(0, 5))
+        # 卡片标题
+        title_frame = ttk.Frame(manual_card)
+        title_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(title_frame, text="📄", font=("", 20)).pack(side="left")
+        ttk.Label(title_frame, text="手工表", font=("", 13, "bold")).pack(side="left", padx=(8, 0))
         
         self.manual_label = ttk.Label(manual_card, text="点击选择文件或拖拽至此...", 
                                       bootstyle="secondary")
@@ -219,13 +223,17 @@ class MainWindow:
                                   lambda e: self._on_sheet_selected("manual"))
         
         # 系统表卡片（增强卡片感：边框、阴影效果）
-        system_card = ttk.Frame(files_frame, padding=20, bootstyle="success", relief="raised", borderwidth=2)
+        system_card = ttk.Frame(files_frame, padding=25, bootstyle="success", relief="raised", borderwidth=2)
         if self._is_narrow_mode():
-            system_card.pack(side="top", fill="both", expand=True, padx=10)
+            system_card.pack(side="top", fill="both", expand=True, padx=5)
         else:
-            system_card.pack(side="left", fill="both", expand=True, padx=10)
+            system_card.pack(side="left", fill="both", expand=True, padx=8)
         
-        ttk.Label(system_card, text="🗂️ 系统表", font=("", 11, "bold")).pack(pady=(0, 5))
+        # 卡片标题
+        title_frame = ttk.Frame(system_card)
+        title_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(title_frame, text="🗂️", font=("", 20)).pack(side="left")
+        ttk.Label(title_frame, text="系统表", font=("", 13, "bold")).pack(side="left", padx=(8, 0))
         
         self.system_label = ttk.Label(system_card, text="点击选择文件或拖拽至此...", 
                                       bootstyle="secondary")
@@ -247,13 +255,21 @@ class MainWindow:
         # 注册拖拽功能（可选）
         self._setup_drag_drop(manual_card, system_card)
         
-        # 下一步按钮
-        btn_frame = ttk.Frame(self.step1_frame)
-        btn_frame.pack(pady=30)
+        # 底部提示和下一步按钮
+        bottom_frame = ttk.Frame(self.step1_frame)
+        bottom_frame.pack(side="bottom", fill="x", pady=(20, 0))
         
-        self.next_btn1 = ttk.Button(btn_frame, text="智能解析 & 进入配置 ➡️", 
-                                    bootstyle="primary", state="disabled",
-                                    command=self._go_to_step2)
+        # 分隔线
+        ttk.Separator(bottom_frame, orient="horizontal").pack(fill="x", pady=(0, 15))
+        
+        # 按钮区域
+        btn_container = ttk.Frame(bottom_frame)
+        btn_container.pack()
+        
+        self.next_btn1 = ttk.Button(btn_container, text="✨ 智能解析 & 进入配置 ➡️", 
+                                    bootstyle="success", state="disabled",
+                                    command=self._go_to_step2,
+                                    width=30)
         self.next_btn1.pack()
     
     def _setup_drag_drop(self, manual_card, system_card):
@@ -479,19 +495,9 @@ class MainWindow:
         """创建步骤3 - 结果"""
         self.step3_frame = ttk.Frame(self.main_container)
         
-        # 使用 grid 布局确保底部按钮条固定
-        self.step3_frame.columnconfigure(0, weight=1)
-        self.step3_frame.rowconfigure(0, weight=1)  # 主内容区可伸缩
-        self.step3_frame.rowconfigure(1, weight=0)  # 分隔线固定
-        self.step3_frame.rowconfigure(2, weight=0)  # 按钮区固定
-        
-        # 主内容区容器
-        content_frame = ttk.Frame(self.step3_frame, padding=15)
-        content_frame.grid(row=0, column=0, sticky="nsew")
-        
         # 统计卡片
-        stats_frame = ttk.Frame(content_frame)
-        stats_frame.pack(fill="x", pady=(0, 15))
+        stats_frame = ttk.Frame(self.step3_frame)
+        stats_frame.pack(fill="x", pady=10)
         
         self.stat_cards = {}
         card_defs = [
@@ -516,8 +522,8 @@ class MainWindow:
             stats_frame.columnconfigure(c, weight=1)
         
         # 结果表格
-        table_frame = ttk.Frame(content_frame)
-        table_frame.pack(fill="both", expand=True)
+        table_frame = ttk.Frame(self.step3_frame)
+        table_frame.pack(fill="both", expand=True, pady=10)
         
         # Treeview
         columns = ("key", "manual", "system", "diff", "status")
@@ -548,22 +554,18 @@ class MainWindow:
         y_scroll.pack(side="right", fill="y")
         self.result_tree.pack(side="left", fill="both", expand=True)
         
-        # 分隔线
-        separator = ttk.Separator(self.step3_frame, orient="horizontal")
-        separator.grid(row=1, column=0, sticky="ew", pady=0)
-        
-        # 底部按钮区（固定在底部）
-        btn_frame = ttk.Frame(self.step3_frame, padding=10, relief="flat")
-        btn_frame.grid(row=2, column=0, sticky="ew")
+        # 按钮区
+        btn_frame = ttk.Frame(self.step3_frame, padding=10)
+        btn_frame.pack(fill="x")
         
         ttk.Button(btn_frame, text="⬅️ 返回配置", bootstyle="secondary",
-                  command=lambda: self._show_step(2)).pack(side="left", padx=(0, 5))
-        
-        ttk.Button(btn_frame, text="🔄 新任务", bootstyle="outline",
-                  command=self._new_task).pack(side="right", padx=(5, 0))
+                  command=lambda: self._show_step(2)).pack(side="left")
         
         ttk.Button(btn_frame, text="📥 导出Excel", bootstyle="success",
-                  command=self._export_results).pack(side="right", padx=5)
+                  command=self._export_results).pack(side="right")
+        
+        ttk.Button(btn_frame, text="🔄 新任务", bootstyle="outline",
+                  command=self._new_task).pack(side="right", padx=10)
 
     def _show_step(self, step: int):
         """显示指定步骤"""

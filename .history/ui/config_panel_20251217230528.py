@@ -6,6 +6,7 @@ from ttkbootstrap.constants import *
 from tkinter import messagebox
 from typing import Dict, List, Any, Callable, Optional
 from .scroll_utils import disable_combobox_scroll, setup_mousewheel_scroll
+from config import UI_FONT_BASE, UI_FONT_SMALL, UI_FONT_MONO, CONTROL_PADDING
 
 
 # 兼容性处理：如果ttkbootstrap没有LabelFrame，创建带标题的Frame替代
@@ -45,7 +46,7 @@ class CollapsibleSection(ttk.Frame):
         )
         self._toggle_btn.pack(side="left")
 
-        self._title_label = ttk.Label(header, text=title, font=("", 10, "bold"), bootstyle=bootstyle)
+        self._title_label = ttk.Label(header, text=title, font=(UI_FONT_BASE[0], UI_FONT_BASE[1], "bold"), bootstyle=bootstyle)
         self._title_label.pack(side="left", padx=(6, 0))
 
         self.body = ttk.Frame(self)
@@ -95,42 +96,53 @@ class ConfigPanel(ttk.Frame):
         self._create_widgets()
 
     def _create_widgets(self):
-        """创建控件"""
-        # 滚动容器
-        canvas = ttk.Canvas(self, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
-        self.scroll_frame = ttk.Frame(canvas)
-        
-        self.scroll_frame.bind(
+        """创建控件：采用 Notebook 收纳各步骤，减少一次性信息量"""
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True)
+
+        # 字段映射 Tab（主键 + 数值比对）
+        mapping_tab = ttk.Frame(self.notebook, padding=CONTROL_PADDING)
+        self.notebook.add(mapping_tab, text="字段映射")
+        _, self.scroll_frame = self._create_scrollable(mapping_tab)
+        self._create_key_section()
+        self._create_value_section()
+
+        # 高级筛选 Tab（筛选 + 透视）
+        filter_tab = ttk.Frame(self.notebook, padding=CONTROL_PADDING)
+        self.notebook.add(filter_tab, text="高级筛选")
+        _, self.scroll_frame = self._create_scrollable(filter_tab)
+        self._create_filter_section()
+
+        # 差值公式 Tab
+        formula_tab = ttk.Frame(self.notebook, padding=CONTROL_PADDING)
+        self.notebook.add(formula_tab, text="差值公式")
+        _, self.scroll_frame = self._create_scrollable(formula_tab)
+        self._create_formula_section()
+
+    def _create_scrollable(self, parent):
+        """创建带滚动的容器并返回 (canvas, frame)。"""
+        canvas = ttk.Canvas(parent, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        frame = ttk.Frame(canvas)
+
+        frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
-        
-        canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw")
+
+        canvas.create_window((0, 0), window=frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
-        
+
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        
-        # 使用统一的滚动条工具设置鼠标滚轮
-        setup_mousewheel_scroll(canvas, self.scroll_frame)
-        
-        # Section 1: 主键配置
-        self._create_key_section()
-        
-        # Section 2: 筛选和透视
-        self._create_filter_section()
-        
-        # Section 3: 数值比对
-        self._create_value_section()
-        
-        # Section 4: 差值公式
-        self._create_formula_section()
+
+        setup_mousewheel_scroll(canvas, frame)
+        return canvas, frame
 
     def _create_key_section(self):
         """创建主键配置区"""
-        frame = ttk.LabelFrame(self.scroll_frame, text="1. 复合主键 (Group By)", padding=10)
-        frame.pack(fill="x", padx=5, pady=5)
+        frame = ttk.LabelFrame(self.scroll_frame, text="1. 复合主键 (Group By)", padding=12)
+        frame.pack(fill="x", padx=8, pady=10)
         
         self.key_container = ttk.Frame(frame)
         self.key_container.pack(fill="x")
@@ -142,7 +154,7 @@ class ConfigPanel(ttk.Frame):
     def _add_key_row(self, manual_val="", system_val=""):
         """添加主键行"""
         row_frame = ttk.Frame(self.key_container)
-        row_frame.pack(fill="x", pady=2)
+        row_frame.pack(fill="x", pady=4)
         
         manual_cb = ttk.Combobox(row_frame, values=self.manual_headers, width=20)
         manual_cb.set(manual_val or "手工表列...")
@@ -170,12 +182,12 @@ class ConfigPanel(ttk.Frame):
         self.filter_section = CollapsibleSection(
             self.scroll_frame,
             title="2. 高级透视 (Pivot & Filter)",
-            bootstyle="",
+            bootstyle="info",
             expanded=False,
         )
         self.filter_section.pack(fill="x", padx=5, pady=5)
 
-        frame = ttk.LabelFrame(self.filter_section.body, text="", padding=10, bootstyle="")
+        frame = ttk.LabelFrame(self.filter_section.body, text="", padding=10)
         frame.pack(fill="x")
         
         # 手工表筛选
@@ -299,8 +311,8 @@ class ConfigPanel(ttk.Frame):
 
     def _create_value_section(self):
         """创建数值比对配置区"""
-        frame = ttk.LabelFrame(self.scroll_frame, text="3. 数值比对 (Value)", padding=10)
-        frame.pack(fill="x", padx=5, pady=5)
+        frame = ttk.LabelFrame(self.scroll_frame, text="3. 数值比对 (Value)", padding=12)
+        frame.pack(fill="x", padx=8, pady=10)
         
         self.value_container = ttk.Frame(frame)
         self.value_container.pack(fill="x")
@@ -312,7 +324,7 @@ class ConfigPanel(ttk.Frame):
     def _add_value_row(self, manual_val="", system_val=""):
         """添加数值比对行"""
         row_frame = ttk.Frame(self.value_container)
-        row_frame.pack(fill="x", pady=2)
+        row_frame.pack(fill="x", pady=4)
         
         manual_cb = ttk.Combobox(row_frame, values=self.manual_headers, width=20)
         manual_cb.set(manual_val or "手工表数值...")
@@ -345,12 +357,12 @@ class ConfigPanel(ttk.Frame):
         self.formula_section = CollapsibleSection(
             self.scroll_frame,
             title="4. 差值公式 (可选)",
-            bootstyle="",
+            bootstyle="warning",
             expanded=False,
         )
         self.formula_section.pack(fill="x", padx=5, pady=5)
 
-        frame = ttk.LabelFrame(self.formula_section.body, text="", padding=10, bootstyle="")
+        frame = ttk.LabelFrame(self.formula_section.body, text="", padding=10)
         frame.pack(fill="x")
         
         # 公式选择下拉框
@@ -368,7 +380,7 @@ class ConfigPanel(ttk.Frame):
         input_frame.pack(fill="x", pady=5)
         
         ttk.Label(input_frame, text="自定义公式:", font=("", 9, "bold")).pack(side="left", padx=5)
-        self.formula_entry = ttk.Entry(input_frame, width=50, font=("Consolas", 10))
+        self.formula_entry = ttk.Entry(input_frame, width=50, font=UI_FONT_MONO)
         self.formula_entry.pack(side="left", fill="x", expand=True, padx=5)
         self.formula_entry.bind("<KeyRelease>", lambda e: self._on_config_changed())
         
@@ -390,7 +402,7 @@ class ConfigPanel(ttk.Frame):
         self.vars_placeholder.pack(anchor="w")
         
         # 示例（动态）
-        self.example_frame = ttk.LabelFrame(frame, text="公式说明", padding=5, bootstyle="")
+        self.example_frame = ttk.LabelFrame(frame, text="公式说明", padding=5, bootstyle="info")
         self.example_frame.pack(fill="x", pady=5)
         
         # 示例容器

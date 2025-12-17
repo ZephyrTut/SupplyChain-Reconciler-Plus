@@ -190,28 +190,32 @@ class MainWindow:
         
         # 文件选择区
         files_frame = ttk.Frame(self.step1_frame)
-        files_frame.pack(fill="x", pady=20)
+        files_frame.pack(fill="both", expand=True, pady=10)
         
         # 手工表卡片（增强卡片感：边框、阴影效果）
-        manual_card = ttk.Frame(files_frame, padding=20, bootstyle="primary", relief="raised", borderwidth=2)
+        manual_card = ttk.Frame(files_frame, padding=25, bootstyle="info", relief="raised", borderwidth=2)
         if self._is_narrow_mode():
-            manual_card.pack(side="top", fill="both", expand=True, padx=10, pady=(0, 10))
+            manual_card.pack(side="top", fill="both", expand=True, padx=5, pady=(0, 15))
         else:
-            manual_card.pack(side="left", fill="both", expand=True, padx=10)
+            manual_card.pack(side="left", fill="both", expand=True, padx=8)
         
-        ttk.Label(manual_card, text="📄 手工表", font=("", 11, "bold")).pack(pady=(0, 5))
+        # 卡片标题
+        title_frame = ttk.Frame(manual_card)
+        title_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(title_frame, text="📄", font=("", 20)).pack(side="left")
+        ttk.Label(title_frame, text="手工表", font=("", 13, "bold")).pack(side="left", padx=(8, 0))
         
         self.manual_label = ttk.Label(manual_card, text="点击选择文件或拖拽至此...", 
-                                      bootstyle="secondary")
-        self.manual_label.pack(pady=5)
+                                      bootstyle="secondary", font=("", 10))
+        self.manual_label.pack(pady=8)
         
         btn_frame_m = ttk.Frame(manual_card)
-        btn_frame_m.pack(pady=5)
+        btn_frame_m.pack(pady=10)
         
-        ttk.Button(btn_frame_m, text="📁 选择文件", bootstyle="primary",
-                  command=lambda: self._select_file("manual")).pack(side="left", padx=2)
+        ttk.Button(btn_frame_m, text="📁 选择文件", bootstyle="info",
+                  command=lambda: self._select_file("manual"), width=12).pack(side="left", padx=3)
         ttk.Button(btn_frame_m, text="📊 活动Excel", bootstyle="info-outline",
-                  command=lambda: self._detect_active("manual")).pack(side="left", padx=2)
+                  command=lambda: self._detect_active("manual"), width=12).pack(side="left", padx=3)
         
         self.manual_sheet_cb = ttk.Combobox(manual_card, state="disabled", width=30)
         self.manual_sheet_cb.pack(pady=10)
@@ -219,25 +223,29 @@ class MainWindow:
                                   lambda e: self._on_sheet_selected("manual"))
         
         # 系统表卡片（增强卡片感：边框、阴影效果）
-        system_card = ttk.Frame(files_frame, padding=20, bootstyle="success", relief="raised", borderwidth=2)
+        system_card = ttk.Frame(files_frame, padding=25, bootstyle="success", relief="raised", borderwidth=2)
         if self._is_narrow_mode():
-            system_card.pack(side="top", fill="both", expand=True, padx=10)
+            system_card.pack(side="top", fill="both", expand=True, padx=5)
         else:
-            system_card.pack(side="left", fill="both", expand=True, padx=10)
+            system_card.pack(side="left", fill="both", expand=True, padx=8)
         
-        ttk.Label(system_card, text="🗂️ 系统表", font=("", 11, "bold")).pack(pady=(0, 5))
+        # 卡片标题
+        title_frame = ttk.Frame(system_card)
+        title_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(title_frame, text="🗂️", font=("", 20)).pack(side="left")
+        ttk.Label(title_frame, text="系统表", font=("", 13, "bold")).pack(side="left", padx=(8, 0))
         
         self.system_label = ttk.Label(system_card, text="点击选择文件或拖拽至此...", 
-                                      bootstyle="secondary")
-        self.system_label.pack(pady=5)
+                                      bootstyle="secondary", font=("", 10))
+        self.system_label.pack(pady=8)
         
         btn_frame_s = ttk.Frame(system_card)
-        btn_frame_s.pack(pady=5)
+        btn_frame_s.pack(pady=10)
         
         ttk.Button(btn_frame_s, text="📁 选择文件", bootstyle="success",
-                  command=lambda: self._select_file("system")).pack(side="left", padx=2)
-        ttk.Button(btn_frame_s, text="📊 活动Excel", bootstyle="info-outline",
-                  command=lambda: self._detect_active("system")).pack(side="left", padx=2)
+                  command=lambda: self._select_file("system"), width=12).pack(side="left", padx=3)
+        ttk.Button(btn_frame_s, text="📊 活动Excel", bootstyle="success-outline",
+                  command=lambda: self._detect_active("system"), width=12).pack(side="left", padx=3)
         
         self.system_sheet_cb = ttk.Combobox(system_card, state="disabled", width=30)
         self.system_sheet_cb.pack(pady=10)
@@ -247,13 +255,21 @@ class MainWindow:
         # 注册拖拽功能（可选）
         self._setup_drag_drop(manual_card, system_card)
         
-        # 下一步按钮
-        btn_frame = ttk.Frame(self.step1_frame)
-        btn_frame.pack(pady=30)
+        # 底部提示和下一步按钮
+        bottom_frame = ttk.Frame(self.step1_frame)
+        bottom_frame.pack(side="bottom", fill="x", pady=(20, 0))
         
-        self.next_btn1 = ttk.Button(btn_frame, text="智能解析 & 进入配置 ➡️", 
-                                    bootstyle="primary", state="disabled",
-                                    command=self._go_to_step2)
+        # 分隔线
+        ttk.Separator(bottom_frame, orient="horizontal").pack(fill="x", pady=(0, 15))
+        
+        # 按钮区域
+        btn_container = ttk.Frame(bottom_frame)
+        btn_container.pack()
+        
+        self.next_btn1 = ttk.Button(btn_container, text="✨ 智能解析 & 进入配置 ➡️", 
+                                    bootstyle="success", state="disabled",
+                                    command=self._go_to_step2,
+                                    width=30)
         self.next_btn1.pack()
     
     def _setup_drag_drop(self, manual_card, system_card):

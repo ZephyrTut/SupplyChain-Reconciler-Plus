@@ -6,6 +6,7 @@ from ttkbootstrap.constants import *
 from tkinter import messagebox
 from typing import Dict, List, Any, Callable, Optional
 from .scroll_utils import disable_combobox_scroll, setup_mousewheel_scroll
+from config import UI_FONT_BASE, UI_FONT_SMALL, UI_FONT_MONO
 
 
 # 兼容性处理：如果ttkbootstrap没有LabelFrame，创建带标题的Frame替代
@@ -45,7 +46,7 @@ class CollapsibleSection(ttk.Frame):
         )
         self._toggle_btn.pack(side="left")
 
-        self._title_label = ttk.Label(header, text=title, font=("", 10, "bold"), bootstyle=bootstyle)
+            self._title_label = ttk.Label(header, text=title, font=(UI_FONT_BASE[0], UI_FONT_BASE[1], "bold"), bootstyle=bootstyle)
         self._title_label.pack(side="left", padx=(6, 0))
 
         self.body = ttk.Frame(self)
@@ -170,12 +171,12 @@ class ConfigPanel(ttk.Frame):
         self.filter_section = CollapsibleSection(
             self.scroll_frame,
             title="2. 高级透视 (Pivot & Filter)",
-            bootstyle="",
+            bootstyle="info",
             expanded=False,
         )
         self.filter_section.pack(fill="x", padx=5, pady=5)
 
-        frame = ttk.LabelFrame(self.filter_section.body, text="", padding=10, bootstyle="")
+        frame = ttk.LabelFrame(self.filter_section.body, text="", padding=10, bootstyle="info")
         frame.pack(fill="x")
         
         # 手工表筛选
@@ -345,12 +346,12 @@ class ConfigPanel(ttk.Frame):
         self.formula_section = CollapsibleSection(
             self.scroll_frame,
             title="4. 差值公式 (可选)",
-            bootstyle="",
+            bootstyle="warning",
             expanded=False,
         )
         self.formula_section.pack(fill="x", padx=5, pady=5)
 
-        frame = ttk.LabelFrame(self.formula_section.body, text="", padding=10, bootstyle="")
+        frame = ttk.LabelFrame(self.formula_section.body, text="", padding=10, bootstyle="warning")
         frame.pack(fill="x")
         
         # 公式选择下拉框
@@ -390,7 +391,7 @@ class ConfigPanel(ttk.Frame):
         self.vars_placeholder.pack(anchor="w")
         
         # 示例（动态）
-        self.example_frame = ttk.LabelFrame(frame, text="公式说明", padding=5, bootstyle="")
+        self.example_frame = ttk.LabelFrame(frame, text="公式说明", padding=5, bootstyle="info")
         self.example_frame.pack(fill="x", pady=5)
         
         # 示例容器

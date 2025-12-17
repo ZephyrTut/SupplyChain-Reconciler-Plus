@@ -109,9 +109,9 @@ class MainWindow:
         # 步骤指示器
         self._create_step_indicator()
         
-        # 主内容区 - 使用 grid 布局确保内容区可伸缩
+        # 主内容区
         self.main_container = ttk.Frame(self.root)
-        self.main_container.pack(fill="both", expand=True)
+        self.main_container.pack(fill="both", expand=True, padx=20, pady=10)
         
         # Step 1: 文件选择
         self._create_step1_frame()
@@ -127,16 +127,15 @@ class MainWindow:
 
     def _create_header(self):
         """创建顶部栏"""
-        header = ttk.Frame(self.root, padding=15, bootstyle="primary")
+        header = ttk.Frame(self.root, padding=10)
         header.pack(fill="x")
         
-        # Logo 区域
+        # Logo
         logo_frame = ttk.Frame(header)
         logo_frame.pack(side="left")
         
-        ttk.Label(logo_frame, text="📊", font=("", 28)).pack(side="left", padx=(0, 8))
-        ttk.Label(logo_frame, text=APP_NAME, font=("", 18, "bold")).pack(side="left")
-        ttk.Label(logo_frame, text=f"v{APP_VERSION}", font=("", 9), bootstyle="secondary").pack(side="left", padx=(8, 0))
+        ttk.Label(logo_frame, text="📊", font=("", 24)).pack(side="left")
+        ttk.Label(logo_frame, text=APP_NAME, font=("", 16, "bold")).pack(side="left", padx=10)
         
         # 模板下拉框区域
         template_frame = ttk.Frame(header)
@@ -158,42 +157,27 @@ class MainWindow:
 
     def _create_step_indicator(self):
         """创建步骤指示器"""
-        indicator = ttk.Frame(self.root, padding=12, bootstyle="light")
+        indicator = ttk.Frame(self.root, padding=10)
         indicator.pack(fill="x")
         
         self.step_labels = []
         steps = ["1. 导入文件", "2. 配置字段", "3. 查看结果"]
         
         for i, step in enumerate(steps):
-            # 步骤容器
-            step_frame = ttk.Frame(indicator)
-            step_frame.pack(side="left", padx=15)
-            
-            label = ttk.Label(step_frame, text=step, font=("", 11, "bold"))
-            label.pack()
-            
-            # 添加底部指示条（后续会通过 bootstyle 高亮当前步骤）
+            label = ttk.Label(indicator, text=step, font=("", 10))
+            label.pack(side="left", padx=20)
             self.step_labels.append(label)
 
     def _create_step1_frame(self):
         """创建步骤1 - 文件选择"""
-        self.step1_frame = ttk.Frame(self.main_container, padding=20)
-        
-        # 欢迎提示文本
-        welcome_frame = ttk.Frame(self.step1_frame)
-        welcome_frame.pack(fill="x", pady=(0, 20))
-        
-        ttk.Label(welcome_frame, text="欢迎使用供应链对账系统", 
-                 font=("", 16, "bold")).pack()
-        ttk.Label(welcome_frame, text="请选择需要对账的手工表和系统表文件", 
-                 font=("", 10), bootstyle="secondary").pack(pady=(5, 0))
+        self.step1_frame = ttk.Frame(self.main_container)
         
         # 文件选择区
         files_frame = ttk.Frame(self.step1_frame)
         files_frame.pack(fill="x", pady=20)
         
-        # 手工表卡片（增强卡片感：边框、阴影效果）
-        manual_card = ttk.Frame(files_frame, padding=20, bootstyle="primary", relief="raised", borderwidth=2)
+        # 手工表
+        manual_card = ttk.Frame(files_frame, padding=20, bootstyle="card")
         if self._is_narrow_mode():
             manual_card.pack(side="top", fill="both", expand=True, padx=10, pady=(0, 10))
         else:
@@ -218,8 +202,8 @@ class MainWindow:
         self.manual_sheet_cb.bind("<<ComboboxSelected>>", 
                                   lambda e: self._on_sheet_selected("manual"))
         
-        # 系统表卡片（增强卡片感：边框、阴影效果）
-        system_card = ttk.Frame(files_frame, padding=20, bootstyle="success", relief="raised", borderwidth=2)
+        # 系统表
+        system_card = ttk.Frame(files_frame, padding=20, bootstyle="card")
         if self._is_narrow_mode():
             system_card.pack(side="top", fill="both", expand=True, padx=10)
         else:
@@ -412,19 +396,9 @@ class MainWindow:
         """创建步骤2 - 配置"""
         self.step2_frame = ttk.Frame(self.main_container)
 
-        # 使用 grid 布局确保底部按钮条固定（主内容区可滚动，按钮区始终可见）
-        self.step2_frame.columnconfigure(0, weight=1)
-        self.step2_frame.rowconfigure(0, weight=1)  # 主内容区可伸缩
-        self.step2_frame.rowconfigure(1, weight=0)  # 分隔线固定
-        self.step2_frame.rowconfigure(2, weight=0)  # 按钮区固定
-
-        # 主内容区容器
-        content_frame = ttk.Frame(self.step2_frame)
-        content_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
-
         if self._is_narrow_mode():
             # 窄屏：Tabs（配置 / 预览）
-            notebook = ttk.Notebook(content_frame)
+            notebook = ttk.Notebook(self.step2_frame)
             notebook.pack(fill="both", expand=True)
 
             config_tab = ttk.Frame(notebook, padding=10)
@@ -439,7 +413,7 @@ class MainWindow:
             self.result_preview.pack(fill="both", expand=True)
         else:
             # 宽屏：两列布局：配置 | 结果预览
-            paned = ttk.PanedWindow(content_frame, orient="horizontal")
+            paned = ttk.PanedWindow(self.step2_frame, orient="horizontal")
             paned.pack(fill="both", expand=True)
 
             # 左侧配置
@@ -456,42 +430,26 @@ class MainWindow:
             self.result_preview = ResultPreview(right_frame)
             self.result_preview.pack(fill="both", expand=True)
         
-        # 分隔线（视觉分层，使底部按钮区更清晰）
-        separator = ttk.Separator(self.step2_frame, orient="horizontal")
-        separator.grid(row=1, column=0, sticky="ew", pady=0)
-
-        # 底部按钮区（固定在底部，不随内容滚动）
-        btn_frame = ttk.Frame(self.step2_frame, padding=10, relief="flat")
-        btn_frame.grid(row=2, column=0, sticky="ew")
+        # 按钮区
+        btn_frame = ttk.Frame(self.step2_frame, padding=10)
+        btn_frame.pack(fill="x")
         
-        # 左侧按钮
         ttk.Button(btn_frame, text="⬅️ 上一步", bootstyle="secondary",
-                  command=lambda: self._show_step(1)).pack(side="left", padx=(0, 5))
+                  command=lambda: self._show_step(1)).pack(side="left")
         
         ttk.Button(btn_frame, text="💾 保存模板", bootstyle="outline",
-                  command=self._save_template).pack(side="left", padx=5)
+                  command=self._save_template).pack(side="left", padx=10)
         
-        # 右侧主操作按钮
         ttk.Button(btn_frame, text="执行对账 ➡️", bootstyle="success",
-                  command=self._run_comparison).pack(side="right", padx=(5, 0))
+                  command=self._run_comparison).pack(side="right")
 
     def _create_step3_frame(self):
         """创建步骤3 - 结果"""
         self.step3_frame = ttk.Frame(self.main_container)
         
-        # 使用 grid 布局确保底部按钮条固定
-        self.step3_frame.columnconfigure(0, weight=1)
-        self.step3_frame.rowconfigure(0, weight=1)  # 主内容区可伸缩
-        self.step3_frame.rowconfigure(1, weight=0)  # 分隔线固定
-        self.step3_frame.rowconfigure(2, weight=0)  # 按钮区固定
-        
-        # 主内容区容器
-        content_frame = ttk.Frame(self.step3_frame, padding=15)
-        content_frame.grid(row=0, column=0, sticky="nsew")
-        
         # 统计卡片
-        stats_frame = ttk.Frame(content_frame)
-        stats_frame.pack(fill="x", pady=(0, 15))
+        stats_frame = ttk.Frame(self.step3_frame)
+        stats_frame.pack(fill="x", pady=10)
         
         self.stat_cards = {}
         card_defs = [
@@ -502,8 +460,7 @@ class MainWindow:
         ]
         cols = 2 if self._is_narrow_mode() else 4
         for idx, (name, icon, style) in enumerate(card_defs):
-            # 统计卡片做成统一“卡片感”（ttk 不支持真正圆角，这里用 card 样式 + 边框提升观感）
-            card = ttk.Frame(stats_frame, padding=12, bootstyle="card", borderwidth=1)
+            card = ttk.Frame(stats_frame, padding=10)
             card.grid(row=idx // cols, column=idx % cols, sticky="nsew", padx=5, pady=5)
             
             ttk.Label(card, text=icon, font=("", 20)).pack()
@@ -516,8 +473,8 @@ class MainWindow:
             stats_frame.columnconfigure(c, weight=1)
         
         # 结果表格
-        table_frame = ttk.Frame(content_frame)
-        table_frame.pack(fill="both", expand=True)
+        table_frame = ttk.Frame(self.step3_frame)
+        table_frame.pack(fill="both", expand=True, pady=10)
         
         # Treeview
         columns = ("key", "manual", "system", "diff", "status")
@@ -548,22 +505,18 @@ class MainWindow:
         y_scroll.pack(side="right", fill="y")
         self.result_tree.pack(side="left", fill="both", expand=True)
         
-        # 分隔线
-        separator = ttk.Separator(self.step3_frame, orient="horizontal")
-        separator.grid(row=1, column=0, sticky="ew", pady=0)
-        
-        # 底部按钮区（固定在底部）
-        btn_frame = ttk.Frame(self.step3_frame, padding=10, relief="flat")
-        btn_frame.grid(row=2, column=0, sticky="ew")
+        # 按钮区
+        btn_frame = ttk.Frame(self.step3_frame, padding=10)
+        btn_frame.pack(fill="x")
         
         ttk.Button(btn_frame, text="⬅️ 返回配置", bootstyle="secondary",
-                  command=lambda: self._show_step(2)).pack(side="left", padx=(0, 5))
-        
-        ttk.Button(btn_frame, text="🔄 新任务", bootstyle="outline",
-                  command=self._new_task).pack(side="right", padx=(5, 0))
+                  command=lambda: self._show_step(2)).pack(side="left")
         
         ttk.Button(btn_frame, text="📥 导出Excel", bootstyle="success",
-                  command=self._export_results).pack(side="right", padx=5)
+                  command=self._export_results).pack(side="right")
+        
+        ttk.Button(btn_frame, text="🔄 新任务", bootstyle="outline",
+                  command=self._new_task).pack(side="right", padx=10)
 
     def _show_step(self, step: int):
         """显示指定步骤"""

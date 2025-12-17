@@ -170,12 +170,12 @@ class ConfigPanel(ttk.Frame):
         self.filter_section = CollapsibleSection(
             self.scroll_frame,
             title="2. 高级透视 (Pivot & Filter)",
-            bootstyle="",
+            bootstyle="info",
             expanded=False,
         )
         self.filter_section.pack(fill="x", padx=5, pady=5)
 
-        frame = ttk.LabelFrame(self.filter_section.body, text="", padding=10, bootstyle="")
+        frame = ttk.LabelFrame(self.filter_section.body, text="", padding=10, bootstyle="info")
         frame.pack(fill="x")
         
         # 手工表筛选
@@ -345,12 +345,12 @@ class ConfigPanel(ttk.Frame):
         self.formula_section = CollapsibleSection(
             self.scroll_frame,
             title="4. 差值公式 (可选)",
-            bootstyle="",
+            bootstyle="warning",
             expanded=False,
         )
         self.formula_section.pack(fill="x", padx=5, pady=5)
 
-        frame = ttk.LabelFrame(self.formula_section.body, text="", padding=10, bootstyle="")
+        frame = ttk.LabelFrame(self.formula_section.body, text="", padding=10, bootstyle="warning")
         frame.pack(fill="x")
         
         # 公式选择下拉框
@@ -390,7 +390,7 @@ class ConfigPanel(ttk.Frame):
         self.vars_placeholder.pack(anchor="w")
         
         # 示例（动态）
-        self.example_frame = ttk.LabelFrame(frame, text="公式说明", padding=5, bootstyle="")
+        self.example_frame = ttk.LabelFrame(frame, text="公式说明", padding=5, bootstyle="info")
         self.example_frame.pack(fill="x", pady=5)
         
         # 示例容器
