@@ -1,108 +1,109 @@
-param(
-    [string]$Version = "v1.4.3"
-)
+name: Build and Release Windows Executable
 
-# Build and package SupplyChain-Reconciler-Plus on Windows
-# Usage: .\build_release.ps1 -Version v1.4.3
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # 匹配 v1.4.3, v2.0.0 等版本标签
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      version:
+        description: '版本号 (例如: v1.4.3)'
+        required: true
+        default: 'v1.0.0'
 
-$ErrorActionPreference = 'Stop'
-$root = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
-Set-Location -Path $root
-Write-Host "Working directory: $root"
-
-# 1. Ensure python executable available
-$pythonCmd = (Get-Command python -ErrorAction SilentlyContinue).Source
-if (-not $pythonCmd) {
-    $pythonCmd = (Get-Command py -ErrorAction SilentlyContinue).Source
-}
-if (-not $pythonCmd) {
-    Write-Error "Python executable not found in PATH. Install Python 3.10+ and retry."
-    exit 1
-}
-
-# 2. Create venv if missing
-$venvDir = Join-Path $root ".venv"
-$pythonExe = Join-Path $venvDir "Scripts\python.exe"
-if (-not (Test-Path $pythonExe)) {
-    Write-Host "Creating virtualenv $venvDir..."
-    & $pythonCmd -m venv $venvDir
-}
-
-# 3. Activate virtualenv (if available)
-Write-Host "Activating virtualenv..."
-$activate = Join-Path $venvDir "Scripts\Activate.ps1"
-if (Test-Path $activate) {
-    . $activate
-} else {
-    Write-Host "Warning: activate script not found, will use explicit python path: $pythonExe"
-}
-
-# 4. Upgrade pip and install deps using venv python
-Write-Host "Upgrading pip..."
-& $pythonExe -m pip install --upgrade pip
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to upgrade pip (exit $LASTEXITCODE). Check network/proxy and try manually."
-    exit 1
-}
-
-Write-Host "Installing requirements..."
-& $pythonExe -m pip install -r requirements.txt
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to install requirements (exit $LASTEXITCODE). Common causes: network/proxy or custom index SSL issues."
-    Write-Host "Suggested fixes:"
-    Write-Host "  1) Ensure HTTP_PROXY/HTTPS_PROXY are set correctly (include hostname), or unset them if not used."
-    Write-Host "  2) Try installing manually with a trusted host:"
-    Write-Host "       & $pythonExe -m pip install --trusted-host mirrors.aliyun.com -i https://mirrors.aliyun.com/pypi/simple -r requirements.txt"
-    Write-Host "  3) Or use the default PyPI index:"
-    Write-Host "       & $pythonExe -m pip install --index-url https://pypi.org/simple -r requirements.txt"
-    Write-Host "  4) If none work, install dependencies on a machine with internet access and re-run this script."
-    exit 1
-}
-
-Write-Host "Installing pyinstaller..."
-& $pythonExe -m pip install pyinstaller
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to install pyinstaller (exit $LASTEXITCODE)."
-    Write-Host "Try: & $pythonExe -m pip install pyinstaller --trusted-host mirrors.aliyun.com -i https://mirrors.aliyun.com/pypi/simple"
-    exit 1
-}
-
-# 5. Verify PyInstaller is available
-Write-Host "Checking PyInstaller..."
-try {
-    & $pythonExe -c "import PyInstaller; print(PyInstaller.__version__)"
-} catch {
-    Write-Error "PyInstaller not installed in venv. Install it with: & $pythonExe -m pip install pyinstaller"
-    Write-Host "If you are behind a proxy, set HTTP_PROXY/HTTPS_PROXY or use:"
-    Write-Host "  & $pythonExe -m pip install --trusted-host mirrors.aliyun.com -i https://mirrors.aliyun.com/pypi/simple pyinstaller"
-    exit 1
-}
-
-# 6. Build with PyInstaller
-Write-Host "Running PyInstaller..."
-& $pythonExe -m PyInstaller --noconfirm --onefile --windowed --name SupplyChain-Reconciler-Plus main.py
-
-# 5. Package zip
-$exe = Join-Path $root "dist\SupplyChain-Reconciler-Plus.exe"
-$zip = Join-Path $root "dist\reconciler-$Version-windows.zip"
-if (Test-Path $exe) {
-    if (Test-Path $zip) { Remove-Item $zip -Force }
-    Write-Host "Zipping $exe -> $zip"
-    Compress-Archive -Path $exe -DestinationPath $zip
-    Write-Host "Package created: $zip"
-} else {
-    Write-Error "Build failed: executable not found: $exe"
-    exit 1
-}
-
-# 6. Create git tag if missing and push
-$tagExists = git tag -l $Version
-if (-Not $tagExists) {
-    Write-Host "Creating git tag $Version..."
-    git tag -a $Version -m "Release $Version"
-    git push origin $Version
-} else {
-    Write-Host "Tag $Version already exists. Skipping tag creation."
-}
-
-Write-Host "Done."
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    permissions:
+      contents: write  # 必须的权限
+    
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # 获取所有历史记录，用于标签检测
+    
+    - name: Determine version
+      id: get_version
+      run: |
+        # 如果是标签触发，使用标签名
+        if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          VERSION="${GITHUB_REF#refs/tags/}"
+        # 如果是手动触发，使用输入参数
+        elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION="${{ github.event.inputs.version }}"
+        # 默认从脚本获取或使用git describe
+        else
+          # 尝试从您的脚本中获取默认版本
+          VERSION="v1.0.0"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Building version: $VERSION"
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        architecture: 'x64'
+    
+    - name: Run your build script
+      env:
+        VERSION: ${{ steps.get_version.outputs.version }}
+      run: |
+        # 直接运行您的PowerShell脚本
+        powershell -ExecutionPolicy Bypass -File ./build_release.ps1 -Version "$env:VERSION"
+    
+    - name: List build artifacts
+      run: |
+        echo "Built artifacts in dist/:"
+        dir dist/
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: SupplyChain-Reconciler-Plus-${{ steps.get_version.outputs.version }}
+        path: |
+          dist/SupplyChain-Reconciler-Plus.exe
+          dist/reconciler-${{ steps.get_version.outputs.version }}-windows.zip
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+      with:
+        tag_name: ${{ steps.get_version.outputs.version }}
+        name: Release ${{ steps.get_version.outputs.version }}
+        body: |
+          # Supply Chain Reconciler Plus ${{ steps.get_version.outputs.version }}
+          
+          ## 🚀 新增功能
+          - [在此处添加版本说明]
+          
+          ## 📦 下载
+          - **SupplyChain-Reconciler-Plus.exe**: 单个可执行文件，无需安装Python环境
+          - **reconciler-${{ steps.get_version.outputs.version }}-windows.zip**: 完整压缩包
+          
+          ## ⚙️ 系统要求
+          - Windows 10 或更高版本
+          - .NET Framework 4.5+ (如果使用了相关组件)
+          
+          ## 🔧 使用说明
+          1. 下载并解压文件
+          2. 双击 `SupplyChain-Reconciler-Plus.exe` 运行
+          3. 按照界面提示操作
+          
+          ## 📝 更新日志
+          - 版本 ${{ steps.get_version.outputs.version }} 初始发布
+          
+          ## 🤝 反馈
+          如有问题，请在 Issues 中反馈。
+        draft: false
+        prerelease: false
+        files: |
+          dist/SupplyChain-Reconciler-Plus.exe
+          dist/reconciler-${{ steps.get_version.outputs.version }}-windows.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
