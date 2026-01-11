@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:  # 添加这行，允许手动触发
+    inputs:
+      version_tag:
+        description: '版本标签 (例如: v1.4.4)'
+        required: true
+        default: 'v1.0.0'
+      skip_release:
+        description: '跳过创建 GitHub Release'
+        required: false
+        default: false
 
 # 允许在 workflow 中使用 GITHUB_TOKEN 创建 release / 上传资源
 permissions:
