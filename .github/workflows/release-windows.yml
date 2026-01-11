@@ -44,24 +44,23 @@ jobs:
 
       - name: Check if Release exists
         id: check_release
-        shell: powershell
-        run: |
-          $tag = '${{ github.ref_name }}'
-          try {
-            $resp = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{ Authorization = "token $env:GITHUB_TOKEN"; Accept = 'application/vnd.github.v3+json' } -ErrorAction Stop
-          } catch {
-            # Not found or other HTTP error -> treat as no release
-            $resp = $null
-          }
-          if ($resp) {
-            "exists=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            $upload = $resp.upload_url -replace '\{\?name,label\}',''
-            "upload_url=$upload" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          } else {
-            "exists=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          }
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const core = require('@actions/core')
+            const tag = process.env.GITHUB_REF_NAME || github.ref.replace('refs/tags/','')
+            try {
+              const resp = await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag })
+              const upload = resp.data.upload_url.replace('{?name,label}','')
+              core.setOutput('exists','true')
+              core.setOutput('upload_url', upload)
+            } catch (e) {
+              if (e.status === 404) {
+                core.setOutput('exists','false')
+              } else {
+                throw e
+              }
+            }
 
       - name: Create Release
         id: create_release
