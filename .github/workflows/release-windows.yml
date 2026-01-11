@@ -15,8 +15,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -39,48 +37,87 @@ jobs:
           $tag = '${{ github.ref_name }}'
           $exe = Join-Path $PWD 'dist\SupplyChain-Reconciler-Plus.exe'
           $zip = Join-Path $PWD "dist\reconciler-$tag-windows.zip"
-          if (Test-Path $exe) { Compress-Archive -Path $exe -DestinationPath $zip -Force }
-          else { Write-Error "Executable not found: $exe"; exit 1 }
+          if (Test-Path $exe) { 
+            Compress-Archive -Path $exe -DestinationPath $zip -Force 
+            Write-Host "✓ Created zip: $zip"
+          }
+          else { 
+            Write-Error "Executable not found: $exe"
+            exit 1 
+          }
 
-      - name: Check if Release exists
-        id: check_release
-        uses: actions/github-script@v6
-        with:
-          # Prefer a provided PAT (RELEASE_PAT) but fall back to the workflow token
-          github-token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
-          script: |
-            // `core`, `github`, and `context` are provided by actions/github-script; do not redeclare them
-            const tag = process.env.GITHUB_REF_NAME || context.ref.replace('refs/tags/','')
-            try {
-              const resp = await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag })
-              const upload = resp.data.upload_url.replace('{?name,label}','')
-              core.setOutput('exists','true')
-              core.setOutput('upload_url', upload)
-            } catch (e) {
-              if (e.status === 404) {
-                core.setOutput('exists','false')
-              } else {
-                throw e
-              }
-            }
-
+      # 方案1：简化的创建发布方法（推荐）
       - name: Create Release
         id: create_release
-        if: ${{ steps.check_release.outputs.exists == 'false' }}
-        uses: actions/create-release@v1
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            dist/reconciler-${{ github.ref_name }}-windows.zip
+            dist/SupplyChain-Reconciler-Plus.exe
+          body: |
+            # Supply Chain Reconciler Plus ${{ github.ref_name }}
+            
+            ## 📦 下载
+            - **reconciler-${{ github.ref_name }}-windows.zip**: 包含可执行文件的压缩包
+            - **SupplyChain-Reconciler-Plus.exe**: 单个可执行文件
+            
+            ## 🚀 使用说明
+            1. 下载并解压
+            2. 双击运行 `SupplyChain-Reconciler-Plus.exe`
+            
+            ## ⚠️ 注意事项
+            - 仅支持 Windows 系统
+            - 首次运行时可能需要管理员权限
+          generate_release_notes: true
         env:
-          # Use RELEASE_PAT if provided in Secrets, otherwise fall back to the default token
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url || steps.check_release.outputs.upload_url }}
-          asset_path: dist/reconciler-${{ github.ref_name }}-windows.zip
-          asset_name: reconciler-${{ github.ref_name }}-windows.zip
-          asset_content_type: application/zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+      # 方案2：如果您想保留原有逻辑，修复版本
+      # - name: Get Release Upload URL
+      #   id: get_upload_url
+      #   uses: actions/github-script@v6
+      #   with:
+      #     script: |
+      #       const { owner, repo } = context.repo;
+      #       const tag = context.ref.replace('refs/tags/', '');
+      #       
+      #       try {
+      #         // 尝试获取已存在的发布
+      #         const release = await github.rest.repos.getReleaseByTag({
+      #           owner,
+      #           repo,
+      #           tag
+      #         });
+      #         core.setOutput('upload_url', release.data.upload_url);
+      #         console.log(`Release already exists for tag ${tag}`);
+      #       } catch (error) {
+      #         if (error.status === 404) {
+      #           // 创建新发布
+      #           const newRelease = await github.rest.repos.createRelease({
+      #             owner,
+      #             repo,
+      #             tag_name: tag,
+      #             name: `Release ${tag}`,
+      #             draft: false,
+      #             prerelease: false
+      #           });
+      #           core.setOutput('upload_url', newRelease.data.upload_url);
+      #           console.log(`Created new release for tag ${tag}`);
+      #         } else {
+      #           throw error;
+      #         }
+      #       }
+      # 
+      # - name: Upload Release Asset
+      #   uses: actions/upload-release-asset@v1
+      #   with:
+      #     upload_url: ${{ steps.get_upload_url.outputs.upload_url }}
+      #     asset_path: dist/reconciler-${{ github.ref_name }}-windows.zip
+      #     asset_name: reconciler-${{ github.ref_name }}-windows.zip
+      #     asset_content_type: application/zip
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
