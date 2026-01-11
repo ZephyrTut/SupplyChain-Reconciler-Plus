@@ -4,14 +4,13 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
     inputs:
       version_tag:
         description: '版本标签 (例如: v1.4.4)'
         required: true
         default: 'v1.0.0'
 
-# 允许在 workflow 中使用 GITHUB_TOKEN 创建 release / 上传资源
 permissions:
   contents: write
 
@@ -22,23 +21,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Determine version tag
-        id: get_tag
+      - name: Set tag variable
+        id: set_tag
         run: |
+          # 安全地设置标签变量
           if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/tags/* ]]; then
-            # 标签推送：从ref中提取标签名
             TAG="${GITHUB_REF#refs/tags/}"
-            echo "Using push tag: $TAG"
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            # 手动触发：使用输入参数
             TAG="${{ github.event.inputs.version_tag }}"
-            echo "Using manual tag: $TAG"
           else
-            # 其他情况（不应该发生）
             TAG="v1.0.0"
-            echo "Using default tag: $TAG"
           fi
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          # 清除换行符和特殊字符
+          CLEAN_TAG=$(echo "$TAG" | tr -d '\n\r' | sed 's/[^a-zA-Z0-9._-]/-/g')
+          echo "TAG=$CLEAN_TAG" >> $GITHUB_ENV
+          echo "tag=$CLEAN_TAG" >> $GITHUB_OUTPUT
+          echo "Using tag: $CLEAN_TAG"
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -58,66 +56,38 @@ jobs:
       - name: Zip artifact
         shell: powershell
         run: |
-          # 使用步骤输出的标签
-          $tag = '${{ steps.get_tag.outputs.tag }}'
+          $tag = "${{ env.TAG }}"
           Write-Host "Creating package for tag: $tag"
           
           $exe = Join-Path $PWD 'dist\SupplyChain-Reconciler-Plus.exe'
           $zip = Join-Path $PWD "dist\reconciler-$tag-windows.zip"
           
           if (Test-Path $exe) { 
-            Compress-Archive -Path $exe -DestinationPath $zip -Force 
-            Write-Host "✓ Created zip: $zip"
+              Compress-Archive -Path $exe -DestinationPath $zip -Force 
+              Write-Host "✓ Created zip: $zip"
           }
           else { 
-            Write-Error "Executable not found: $exe"
-            exit 1 
+              Write-Error "Executable not found: $exe"
+              exit 1 
           }
 
-      - name: Check executable
-        shell: powershell
-        run: |
-          $exe = Join-Path $PWD 'dist\SupplyChain-Reconciler-Plus.exe'
-          $zip = Join-Path $PWD "dist\reconciler-${{ steps.get_tag.outputs.tag }}-windows.zip"
-          
-          Write-Host "Verifying build artifacts..."
-          if (Test-Path $exe) {
-            $exeInfo = Get-Item $exe
-            Write-Host "✅ Executable: $($exeInfo.Name)"
-            Write-Host "   Size: $([math]::Round($exeInfo.Length/1MB, 2)) MB"
-          } else {
-            Write-Error "❌ Executable not found: $exe"
-            exit 1
-          }
-          
-          if (Test-Path $zip) {
-            $zipInfo = Get-Item $zip
-            Write-Host "✅ Zip package: $($zipInfo.Name)"
-            Write-Host "   Size: $([math]::Round($zipInfo.Length/1MB, 2)) MB"
-          } else {
-            Write-Error "❌ Zip package not found: $zip"
-            exit 1
-          }
-
-      - name: Create Release (only for tag pushes)
+      - name: Create Release
         id: create_release
-        # 只在标签推送时创建Release，手动触发时跳过
-        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.get_tag.outputs.tag }}
-          name: Release ${{ steps.get_tag.outputs.tag }}
+          tag_name: ${{ env.TAG }}
+          name: Release ${{ env.TAG }}
           draft: false
           prerelease: false
           files: |
-            dist/reconciler-${{ steps.get_tag.outputs.tag }}-windows.zip
+            dist/reconciler-${{ env.TAG }}-windows.zip
             dist/SupplyChain-Reconciler-Plus.exe
           body: |
-            # Supply Chain Reconciler Plus ${{ steps.get_tag.outputs.tag }}
+            # Supply Chain Reconciler Plus ${{ env.TAG }}
             
             ## 📦 下载
-            - **reconciler-${{ steps.get_tag.outputs.tag }}-windows.zip**: 包含可执行文件的压缩包
-            - **SupplyChain-Reconciler-Plus.exe**: 单个可执行文件（可从zip中提取）
+            - **reconciler-${{ env.TAG }}-windows.zip**: 包含可执行文件的压缩包
+            - **SupplyChain-Reconciler-Plus.exe**: 单个可执行文件
             
             ## 🚀 使用说明
             1. 下载并解压
@@ -126,22 +96,6 @@ jobs:
             ## ⚠️ 注意事项
             - 仅支持 Windows 系统
             - 首次运行时可能需要管理员权限
-            
-            ## 🔧 构建信息
-            - 构建时间: ${{ steps.get_tag.outputs.tag }}
-            - Python 版本: 3.11
-            - 构建工具: PyInstaller
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Artifact (for manual runs)
-        # 手动触发时上传到Artifacts，便于下载测试
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v3
-        with:
-          name: SupplyChain-Reconciler-Plus-${{ steps.get_tag.outputs.tag }}
-          path: |
-            dist/SupplyChain-Reconciler-Plus.exe
-            dist/reconciler-${{ steps.get_tag.outputs.tag }}-windows.zip
-          retention-days: 7
