@@ -49,8 +49,8 @@ jobs:
           # Prefer a provided PAT (RELEASE_PAT) but fall back to the workflow token
           github-token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           script: |
-            const core = require('@actions/core')
-            const tag = process.env.GITHUB_REF_NAME || github.ref.replace('refs/tags/','')
+            // `core`, `github`, and `context` are provided by actions/github-script; do not redeclare them
+            const tag = process.env.GITHUB_REF_NAME || context.ref.replace('refs/tags/','')
             try {
               const resp = await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag })
               const upload = resp.data.upload_url.replace('{?name,label}','')
