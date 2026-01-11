@@ -47,9 +47,13 @@ jobs:
         shell: powershell
         run: |
           $tag = '${{ github.ref_name }}'
-          $resp = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{ Authorization = "token $env:GITHUB_TOKEN"; Accept = 'application/vnd.github.v3+json' } -ErrorAction SilentlyContinue
+          try {
+            $resp = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{ Authorization = "token $env:GITHUB_TOKEN"; Accept = 'application/vnd.github.v3+json' } -ErrorAction Stop
+          } catch {
+            # Not found or other HTTP error -> treat as no release
+            $resp = $null
+          }
           if ($resp) {
-            # mark exists=true and export upload_url without template
             "exists=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             $upload = $resp.upload_url -replace '\{\?name,label\}',''
             "upload_url=$upload" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
