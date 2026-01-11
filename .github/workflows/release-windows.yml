@@ -42,8 +42,26 @@ jobs:
           if (Test-Path $exe) { Compress-Archive -Path $exe -DestinationPath $zip -Force }
           else { Write-Error "Executable not found: $exe"; exit 1 }
 
+      - name: Check if Release exists
+        id: check_release
+        shell: powershell
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $resp = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers @{ Authorization = "token $env:GITHUB_TOKEN"; Accept = 'application/vnd.github.v3+json' } -ErrorAction SilentlyContinue
+          if ($resp) {
+            # mark exists=true and export upload_url without template
+            "exists=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            $upload = $resp.upload_url -replace '\{\?name,label\}',''
+            "upload_url=$upload" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            "exists=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create Release
         id: create_release
+        if: ${{ steps.check_release.outputs.exists == 'false' }}
         uses: actions/create-release@v1
         with:
           tag_name: ${{ github.ref_name }}
@@ -54,7 +72,7 @@ jobs:
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          upload_url: ${{ steps.create_release.outputs.upload_url || steps.check_release.outputs.upload_url }}
           asset_path: dist/reconciler-${{ github.ref_name }}-windows.zip
           asset_name: reconciler-${{ github.ref_name }}-windows.zip
           asset_content_type: application/zip
