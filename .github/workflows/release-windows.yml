@@ -5,12 +5,18 @@ on:
     tags:
       - 'v*'
 
+# 允许在 workflow 中使用 GITHUB_TOKEN 创建 release / 上传资源
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v4
