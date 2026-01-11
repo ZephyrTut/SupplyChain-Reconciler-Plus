@@ -46,6 +46,8 @@ jobs:
         id: check_release
         uses: actions/github-script@v6
         with:
+          # Prefer a provided PAT (RELEASE_PAT) but fall back to the workflow token
+          github-token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           script: |
             const core = require('@actions/core')
             const tag = process.env.GITHUB_REF_NAME || github.ref.replace('refs/tags/','')
@@ -70,7 +72,8 @@ jobs:
           tag_name: ${{ github.ref_name }}
           release_name: Release ${{ github.ref_name }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use RELEASE_PAT if provided in Secrets, otherwise fall back to the default token
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
@@ -80,4 +83,4 @@ jobs:
           asset_name: reconciler-${{ github.ref_name }}-windows.zip
           asset_content_type: application/zip
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}

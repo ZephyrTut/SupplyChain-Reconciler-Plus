@@ -14,7 +14,7 @@ SupplyChain-Reconciler-Plus v1.4.3
   ✓ 实时匹配预览
   ✓ 导出带颜色背景的Excel结果
   ✓ 支持 .xls/.xlsx/.xlsm 格式
-
+ 
 技术栈:
   - PyQt6 + qt-material（现代化UI框架）
   - pandas（高性能数据处理）

@@ -117,3 +117,6 @@ Thumbs.db
 
 # other
 *.swp
+
+# history files
+.history
