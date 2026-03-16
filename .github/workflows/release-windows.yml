@@ -20,23 +20,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set tag variable
         id: set_tag
+        shell: pwsh
         run: |
-          # 安全地设置标签变量
-          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            TAG="${{ github.event.inputs.version_tag }}"
-          else
-            TAG="v1.0.0"
-          fi
-          # 清除换行符和特殊字符
-          CLEAN_TAG=$(echo "$TAG" | tr -d '\n\r' | sed 's/[^a-zA-Z0-9._-]/-/g')
-          echo "TAG=$CLEAN_TAG" >> $GITHUB_ENV
-          echo "tag=$CLEAN_TAG" >> $GITHUB_OUTPUT
-          echo "Using tag: $CLEAN_TAG"
+          # 安全地设置标签变量（PowerShell 版本）
+          if ("${{ github.event_name }}" -eq "push" -and "${{ github.ref }}" -like "refs/tags/*") {
+            $tag = "${{ github.ref }}".Replace("refs/tags/", "")
+          }
+          elseif ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ github.event.inputs.version_tag }}"
+          }
+          else {
+            $tag = "v1.0.0"
+          }
+
+          # 清除换行和非法字符
+          $cleanTag = ($tag -replace "[`r`n]", "") -replace "[^a-zA-Z0-9._-]", "-"
+
+          "TAG=$cleanTag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "tag=$cleanTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Using tag: $cleanTag"
 
       - name: Setup Python
         uses: actions/setup-python@v4
