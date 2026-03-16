@@ -66,6 +66,18 @@ jobs:
             pip install -r requirements.txt
             pip install pyinstaller
 
+      - name: Install UPX
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 2
+          retry_on: error
+          shell: pwsh
+          command: |
+            choco install upx -y
+            $upxPath = (Get-Command upx -ErrorAction Stop).Source
+            Write-Host "UPX installed at: $upxPath"
+
       - name: Build executable with PyInstaller
         uses: nick-fields/retry@v3
         with:
@@ -74,7 +86,16 @@ jobs:
           retry_on: error
           shell: pwsh
           command: |
-            pyinstaller --noconfirm --onefile --windowed --name ${{ env.APP_NAME }} main.py
+            $upxDir = Split-Path -Parent (Get-Command upx -ErrorAction Stop).Source
+            pyinstaller --noconfirm --clean --onefile --windowed `
+              --name ${{ env.APP_NAME }} `
+              --upx-dir "$upxDir" `
+              --exclude-module IPython `
+              --exclude-module jupyter `
+              --exclude-module matplotlib `
+              --exclude-module pytest `
+              --exclude-module scipy `
+              main.py
 
       - name: Package and generate hashes
         shell: pwsh
@@ -88,11 +109,11 @@ jobs:
           }
 
           $exeName = "${{ env.APP_NAME }}-$tag-${{ env.PLATFORM }}.exe"
-          $zipName = "${{ env.APP_NAME }}-$tag-${{ env.PLATFORM }}.zip"
+          $packageName = "${{ env.APP_NAME }}-$tag-${{ env.PLATFORM }}.7z"
           $hashName = "${{ env.APP_NAME }}-$tag-${{ env.PLATFORM }}.sha256"
 
           $exeOut = Join-Path $distDir $exeName
-          $zipOut = Join-Path $distDir $zipName
+          $packageOut = Join-Path $distDir $packageName
           $hashOut = Join-Path $distDir $hashName
 
           Copy-Item $rawExe $exeOut -Force
@@ -102,22 +123,28 @@ jobs:
             throw "EXE size too small ($exeSize bytes), build may be invalid"
           }
 
-          Compress-Archive -Path $exeOut -DestinationPath $zipOut -Force
+          $sevenZip = Get-Command 7z -ErrorAction SilentlyContinue
+          if ($null -ne $sevenZip) {
+            & $sevenZip.Source a -t7z -mx=9 -mmt=on $packageOut $exeOut | Out-Host
+          }
+          else {
+            # 兜底：如果7z不可用，退化为zip
+            $packageName = "${{ env.APP_NAME }}-$tag-${{ env.PLATFORM }}.zip"
+            $packageOut = Join-Path $distDir $packageName
+            Compress-Archive -Path $exeOut -DestinationPath $packageOut -Force
+          }
 
-          $exeHash = (Get-FileHash $exeOut -Algorithm SHA256).Hash.ToLower()
-          $zipHash = (Get-FileHash $zipOut -Algorithm SHA256).Hash.ToLower()
+          $packageHash = (Get-FileHash $packageOut -Algorithm SHA256).Hash.ToLower()
 
           @(
-            "$exeHash *$exeName",
-            "$zipHash *$zipName"
+            "$packageHash *$packageName"
           ) | Set-Content -Path $hashOut -Encoding ascii
 
-          "EXE_FILE=$exeName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "ZIP_FILE=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PACKAGE_FILE=$packageName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "HASH_FILE=$hashName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          Write-Host "✓ Packaged: $exeOut"
-          Write-Host "✓ Packaged: $zipOut"
+          Write-Host "✓ Built exe: $exeOut"
+          Write-Host "✓ Packaged: $packageOut"
           Write-Host "✓ Hash file: $hashOut"
 
       - name: Validate artifact checksums
@@ -129,8 +156,8 @@ jobs:
           }
 
           $lines = Get-Content $hashPath | Where-Object { $_.Trim() -ne '' }
-          if ($lines.Count -lt 2) {
-            throw "Checksum file content invalid: expected 2 lines"
+          if ($lines.Count -lt 1) {
+            throw "Checksum file content invalid: expected >= 1 line"
           }
 
           foreach ($line in $lines) {
@@ -150,20 +177,18 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            dist/${{ env.EXE_FILE }}
-            dist/${{ env.ZIP_FILE }}
+            dist/${{ env.PACKAGE_FILE }}
             dist/${{ env.HASH_FILE }}
           body: |
             # Supply Chain Reconciler Plus ${{ env.TAG }}
             
             ## 📦 下载
-            - **${{ env.ZIP_FILE }}**: 可执行文件压缩包
-            - **${{ env.EXE_FILE }}**: 单文件可执行程序
+            - **${{ env.PACKAGE_FILE }}**: 高压缩安装包（推荐）
             - **${{ env.HASH_FILE }}**: SHA256 校验文件
             
             ## 🚀 使用说明
             1. 下载并解压
-            2. 双击运行 `${{ env.EXE_FILE }}`
+            2. 双击运行 `${{ env.APP_NAME }}-${{ env.TAG }}-${{ env.PLATFORM }}.exe`
             
             ## 🔐 完整性校验
             可使用 `${{ env.HASH_FILE }}` 对下载文件进行 SHA256 校验。
