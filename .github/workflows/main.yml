@@ -1,0 +1,2 @@
+gh release list
+gh release download v1.4.7
