@@ -5,9 +5,9 @@ from typing import List, Dict, Any, Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea,
     QLabel, QComboBox, QLineEdit, QPushButton, QFrame, QGroupBox,
-    QSizePolicy, QSpacerItem, QCheckBox
+    QSizePolicy, QSpacerItem, QCheckBox, QDialog, QListWidget, QListWidgetItem
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 from PyQt6.QtGui import QFont, QWheelEvent
 
 
@@ -128,6 +128,129 @@ class KeyMappingRow(DynamicRow):
         idx = self.system_combo.findText(current_system)
         if idx >= 0:
             self.system_combo.setCurrentIndex(idx)
+class MultiSelectValueDialog(QDialog):
+    """多值选择弹窗（用于包含于/不包含于）"""
+
+    def __init__(self, title: str, values: List[str], selected_values: List[str], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.resize(420, 520)
+
+        self._all_values = [str(v) for v in values if str(v).strip()]
+        self._selected_values = set([str(v).strip() for v in selected_values if str(v).strip()])
+
+        self._setup_ui()
+        self._load_items()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("输入关键字过滤，如：入库")
+        self.search_edit.textChanged.connect(self._filter_items)
+        layout.addWidget(self.search_edit)
+
+        quick_layout = QHBoxLayout()
+        self.btn_select_all = QPushButton("全选")
+        self.btn_clear_all = QPushButton("清空")
+        self.btn_select_all.clicked.connect(self._select_all_visible)
+        self.btn_clear_all.clicked.connect(self._clear_all_visible)
+        quick_layout.addWidget(self.btn_select_all)
+        quick_layout.addWidget(self.btn_clear_all)
+        quick_layout.addStretch()
+        layout.addLayout(quick_layout)
+
+        self.list_widget = QListWidget()
+        self.list_widget.itemChanged.connect(lambda _: self._refresh_count_label())
+        self.list_widget.viewport().installEventFilter(self)
+        self.list_widget.setStyleSheet("""
+            QListWidget {
+                background-color: #ffffff;
+                color: #333333;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+        """)
+        layout.addWidget(self.list_widget, 1)
+
+        self.count_label = QLabel("已选 0 项")
+        self.count_label.setStyleSheet("color: #666;")
+        layout.addWidget(self.count_label)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        cancel_btn = QPushButton("取消")
+        ok_btn = QPushButton("确定")
+        cancel_btn.clicked.connect(self.reject)
+        ok_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(ok_btn)
+        layout.addLayout(btn_layout)
+
+    def eventFilter(self, obj, event):
+        if obj is self.list_widget.viewport() and event.type() == QEvent.Type.MouseButtonRelease:
+            item = self.list_widget.itemAt(event.position().toPoint())
+            if item:
+                rect = self.list_widget.visualItemRect(item)
+                # 左侧约24px保留给默认复选框点击，其他区域点击时手动切换
+                if event.position().x() > rect.left() + 24:
+                    self._toggle_item_check_state(item)
+                    return True
+        return super().eventFilter(obj, event)
+
+    def _toggle_item_check_state(self, item: QListWidgetItem):
+        new_state = (
+            Qt.CheckState.Unchecked
+            if item.checkState() == Qt.CheckState.Checked
+            else Qt.CheckState.Checked
+        )
+        item.setCheckState(new_state)
+        self._refresh_count_label()
+
+    def _load_items(self):
+        self.list_widget.clear()
+        for value in self._all_values:
+            item = QListWidgetItem(value)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.CheckState.Checked if value in self._selected_values else Qt.CheckState.Unchecked
+            )
+            self.list_widget.addItem(item)
+        self._refresh_count_label()
+
+    def _filter_items(self, text: str):
+        keyword = text.strip().lower()
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            item.setHidden(keyword not in item.text().lower() if keyword else False)
+
+    def _select_all_visible(self):
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if not item.isHidden():
+                item.setCheckState(Qt.CheckState.Checked)
+        self._refresh_count_label()
+
+    def _clear_all_visible(self):
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if not item.isHidden():
+                item.setCheckState(Qt.CheckState.Unchecked)
+        self._refresh_count_label()
+
+    def _refresh_count_label(self):
+        self.count_label.setText(f"已选 {len(self.get_selected_values())} 项")
+
+    def get_selected_values(self) -> List[str]:
+        selected = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                selected.append(item.text())
+        return selected
 
 
 class FilterRow(DynamicRow):
@@ -158,6 +281,7 @@ class FilterRow(DynamicRow):
         self.unique_values = unique_values or {}
         self._current_value_widget = None
         self._checkboxes = []  # 存储多选复选框
+        self._selected_multiselect_values: List[str] = []
         super().__init__(parent)
         
     def _setup_ui(self):
@@ -254,48 +378,92 @@ class FilterRow(DynamicRow):
     def _create_multiselect_widget(self):
         """创建多选复选框控件（包含于）"""
         self._clear_value_widget()
-        
-        # 创建滚动区域容纳复选框
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setMaximumHeight(80)
-        scroll.setMinimumWidth(200)
-        scroll.setStyleSheet("""
-            QScrollArea {
+
+        wrapper = QWidget()
+        wrapper_layout = QHBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.setSpacing(6)
+
+        self.multiselect_summary_label = QLabel()
+        self.multiselect_summary_label.setMinimumWidth(160)
+        self.multiselect_summary_label.setStyleSheet("color: #333;")
+        wrapper_layout.addWidget(self.multiselect_summary_label, 1)
+
+        self.multiselect_btn = QPushButton("选择...")
+        self.multiselect_btn.setFixedHeight(28)
+        self.multiselect_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f5f5f5;
+                color: #333;
                 border: 1px solid #ddd;
                 border-radius: 4px;
-                background: white;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                border-color: #2196F3;
+                background-color: #f0f7ff;
             }
         """)
-        
-        checkbox_container = QWidget()
-        checkbox_layout = QVBoxLayout(checkbox_container)
-        checkbox_layout.setContentsMargins(5, 5, 5, 5)
-        checkbox_layout.setSpacing(2)
-        
-        # 获取当前列的唯一值
-        column = self.column_combo.currentText()
-        values = []
-        if column in self.unique_values:
-            values = [str(v) for v in self.unique_values[column] if v is not None][:50]
-        
-        if values:
-            for val in values:
-                cb = QCheckBox(val)
-                cb.setStyleSheet("color: #333;")
-                cb.stateChanged.connect(self._on_checkbox_changed)
-                checkbox_layout.addWidget(cb)
-                self._checkboxes.append(cb)
-        else:
-            # 没有唯一值时显示提示
-            hint = QLabel("请先选择列")
-            hint.setStyleSheet("color: #999; font-style: italic;")
-            checkbox_layout.addWidget(hint)
-        
-        checkbox_layout.addStretch()
-        scroll.setWidget(checkbox_container)
-        self.value_layout.addWidget(scroll)
+        self.multiselect_btn.clicked.connect(self._open_multiselect_dialog)
+        wrapper_layout.addWidget(self.multiselect_btn)
+
+        self.value_layout.addWidget(wrapper)
+
+        # 保留仍存在于当前可选值中的已选项
+        current_options = set(self._get_current_column_values())
+        self._selected_multiselect_values = [
+            v for v in self._selected_multiselect_values if v in current_options
+        ]
+        self._refresh_multiselect_summary()
         self._current_value_widget = "multiselect"
+
+    def _get_current_column_values(self) -> List[str]:
+        """获取当前列的唯一值列表（最多200个）。"""
+        column = self.column_combo.currentText()
+        if column not in self.unique_values:
+            return []
+        return [str(v) for v in self.unique_values[column] if v is not None][:200]
+
+    def _open_multiselect_dialog(self):
+        """打开多选弹窗。"""
+        options = self._get_current_column_values()
+        if not options:
+            self._refresh_multiselect_summary()
+            return
+
+        dialog = MultiSelectValueDialog(
+            "选择筛选值",
+            options,
+            self._selected_multiselect_values,
+            self
+        )
+        if dialog.exec():
+            self._selected_multiselect_values = dialog.get_selected_values()
+            self._refresh_multiselect_summary()
+            self.changed.emit()
+
+    def _refresh_multiselect_summary(self):
+        """刷新多选摘要显示。"""
+        options_count = len(self._get_current_column_values())
+        selected_count = len(self._selected_multiselect_values)
+
+        if options_count == 0:
+            self.multiselect_summary_label.setText("当前列暂无可选值")
+            if hasattr(self, 'multiselect_btn'):
+                self.multiselect_btn.setEnabled(False)
+            return
+
+        if hasattr(self, 'multiselect_btn'):
+            self.multiselect_btn.setEnabled(True)
+
+        if selected_count == 0:
+            self.multiselect_summary_label.setText(f"共 {options_count} 项，未选择")
+            return
+
+        preview = "，".join(self._selected_multiselect_values[:2])
+        if selected_count > 2:
+            preview += f" 等{selected_count}项"
+        self.multiselect_summary_label.setText(preview)
     
     def _on_checkbox_changed(self):
         """复选框状态变化"""
@@ -309,7 +477,7 @@ class FilterRow(DynamicRow):
         column = self.column_combo.currentText()
         if column in self.unique_values:
             values = [str(v) for v in self.unique_values[column] if v is not None]
-            self.value_combo.addItems(values[:100])
+            self.value_combo.addItems(values[:200])
         
     def _on_column_changed(self, index: int):
         """列选择变更"""
@@ -350,8 +518,7 @@ class FilterRow(DynamicRow):
         elif self._current_value_widget == "input" and hasattr(self, 'value_edit'):
             value = self.value_edit.text()
         elif self._current_value_widget == "multiselect":
-            selected = [cb.text() for cb in self._checkboxes if cb.isChecked()]
-            value = ",".join(selected)
+            value = ",".join(self._selected_multiselect_values)
         
         if value:
             # 映射操作符到引擎格式
@@ -375,9 +542,10 @@ class FilterRow(DynamicRow):
             elif self._current_value_widget == "input" and hasattr(self, 'value_edit'):
                 self.value_edit.setText(val_str)
             elif self._current_value_widget == "multiselect":
-                selected_values = val_str.split(",")
-                for cb in self._checkboxes:
-                    cb.setChecked(cb.text() in selected_values)
+                selected_values = [v.strip() for v in val_str.split(",") if v.strip()]
+                current_options = set(self._get_current_column_values())
+                self._selected_multiselect_values = [v for v in selected_values if v in current_options]
+                self._refresh_multiselect_summary()
             
     def update_unique_values(self, unique_values: Dict[str, List]):
         """更新唯一值字典"""
@@ -615,7 +783,10 @@ class QtConfigPanel(QScrollArea):
         self.key_rows: List[KeyMappingRow] = []
         self.manual_filter_rows: List[FilterRow] = []
         self.system_filter_rows: List[FilterRow] = []
+        self.manual_exception_rows: List[FilterRow] = []
+        self.system_exception_rows: List[FilterRow] = []
         self.clean_rows: List[ColumnCleanRow] = []  # 列清洗行
+        self._updating_formula_options = False
         
         self._setup_ui()
         
@@ -821,6 +992,31 @@ class QtConfigPanel(QScrollArea):
         """)
         add_manual_filter_btn.clicked.connect(lambda: self._add_filter_row("manual"))
         self.filter_section.add_widget(add_manual_filter_btn)
+
+        # 手工表例外保留
+        manual_exception_hint = QLabel("🛟 例外保留（满足任一即可保留）：主筛选 OR 例外保留")
+        manual_exception_hint.setStyleSheet("color: #8e24aa; font-size: 11px;")
+        manual_exception_hint.setWordWrap(True)
+        self.filter_section.add_widget(manual_exception_hint)
+
+        self.manual_exception_container = QWidget()
+        self.manual_exception_layout = QVBoxLayout(self.manual_exception_container)
+        self.manual_exception_layout.setContentsMargins(0, 0, 0, 0)
+        self.filter_section.add_widget(self.manual_exception_container)
+
+        add_manual_exception_btn = QPushButton("➕ 添加例外保留")
+        add_manual_exception_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f3e5f5;
+                color: #6a1b9a;
+                border: 1px dashed #8e24aa;
+                padding: 6px;
+                border-radius: 4px;
+            }
+            QPushButton:hover { background-color: #e1bee7; }
+        """)
+        add_manual_exception_btn.clicked.connect(lambda: self._add_exception_row("manual"))
+        self.filter_section.add_widget(add_manual_exception_btn)
         
         # === 手工表透视配置区域（独立区域，在筛选下方）===
         self.manual_pivot_container = QWidget()
@@ -911,6 +1107,31 @@ class QtConfigPanel(QScrollArea):
         """)
         add_system_filter_btn.clicked.connect(lambda: self._add_filter_row("system"))
         self.filter_section.add_widget(add_system_filter_btn)
+
+        # 系统表例外保留
+        system_exception_hint = QLabel("🛟 例外保留（满足任一即可保留）：主筛选 OR 例外保留")
+        system_exception_hint.setStyleSheet("color: #8e24aa; font-size: 11px;")
+        system_exception_hint.setWordWrap(True)
+        self.filter_section.add_widget(system_exception_hint)
+
+        self.system_exception_container = QWidget()
+        self.system_exception_layout = QVBoxLayout(self.system_exception_container)
+        self.system_exception_layout.setContentsMargins(0, 0, 0, 0)
+        self.filter_section.add_widget(self.system_exception_container)
+
+        add_system_exception_btn = QPushButton("➕ 添加例外保留")
+        add_system_exception_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f3e5f5;
+                color: #6a1b9a;
+                border: 1px dashed #8e24aa;
+                padding: 6px;
+                border-radius: 4px;
+            }
+            QPushButton:hover { background-color: #e1bee7; }
+        """)
+        add_system_exception_btn.clicked.connect(lambda: self._add_exception_row("system"))
+        self.filter_section.add_widget(add_system_exception_btn)
         
         # 分隔线
         separator3 = QWidget()
@@ -996,6 +1217,31 @@ class QtConfigPanel(QScrollArea):
             self._update_manual_pivot_config()  # 删除后更新透视配置
         else:
             self.system_filter_rows.remove(row)
+        row.deleteLater()
+        self._emit_config_changed()
+
+    def _add_exception_row(self, table_type: str):
+        """添加例外保留行"""
+        if table_type == "manual":
+            row = FilterRow(self.manual_columns, self.manual_unique_values)
+            row.deleted.connect(lambda r: self._remove_exception_row(r, "manual"))
+            self.manual_exception_rows.append(row)
+            self.manual_exception_layout.addWidget(row)
+        else:
+            row = FilterRow(self.system_columns, self.system_unique_values)
+            row.deleted.connect(lambda r: self._remove_exception_row(r, "system"))
+            self.system_exception_rows.append(row)
+            self.system_exception_layout.addWidget(row)
+        row.changed.connect(self._emit_config_changed)
+
+    def _remove_exception_row(self, row: FilterRow, table_type: str):
+        """删除例外保留行"""
+        if table_type == "manual":
+            if row in self.manual_exception_rows:
+                self.manual_exception_rows.remove(row)
+        else:
+            if row in self.system_exception_rows:
+                self.system_exception_rows.remove(row)
         row.deleteLater()
         self._emit_config_changed()
     
@@ -1106,6 +1352,9 @@ class QtConfigPanel(QScrollArea):
             "自定义..."
         ])
         self.formula_quick_combo.currentIndexChanged.connect(self._on_formula_quick_selected)
+        # 处理“重复选择同一项”场景（模板加载后常见）
+        self.formula_quick_combo.activated.connect(self._on_formula_quick_selected)
+        self.formula_quick_combo.currentTextChanged.connect(lambda _: self._on_formula_quick_selected(self.formula_quick_combo.currentIndex()))
         quick_layout.addWidget(self.formula_quick_combo, 1)
         
         quick_widget = QWidget()
@@ -1137,7 +1386,13 @@ class QtConfigPanel(QScrollArea):
         
     def _on_formula_quick_selected(self, index: int):
         """快速选择公式"""
-        text = self.formula_quick_combo.currentText()
+        if self._updating_formula_options:
+            return
+
+        if index < 0 or index >= self.formula_quick_combo.count():
+            return
+
+        text = self.formula_quick_combo.itemText(index)
         if "自定义" not in text and text:
             # 提取公式部分 - 格式如 "B - F (手工 - 系统总计)" 或 "B - (F - C) (排除XX)"
             # 找到最后一个括号说明，取其前面的公式部分
@@ -1156,10 +1411,13 @@ class QtConfigPanel(QScrollArea):
         Args:
             column_letters: 列名到字母的映射，如 {"__KEY__": "A", "手工数量": "B", ...}
         """
-        # 保存当前公式
+        # 保存当前状态
         current_formula = self.formula_edit.text()
-        
-        # 清空选项
+        selected_quick_text = self.formula_quick_combo.currentText()
+
+        # 更新选项时避免触发公式重置
+        self._updating_formula_options = True
+        self.formula_quick_combo.blockSignals(True)
         self.formula_quick_combo.clear()
         
         # 从column_letters获取实际的列字母
@@ -1210,6 +1468,18 @@ class QtConfigPanel(QScrollArea):
         
         # 更新下拉框
         self.formula_quick_combo.addItems(formula_options)
+
+        # 尽量恢复用户之前选中的快速选项
+        restore_idx = self.formula_quick_combo.findText(selected_quick_text)
+        if restore_idx >= 0:
+            self.formula_quick_combo.setCurrentIndex(restore_idx)
+        else:
+            custom_idx = self.formula_quick_combo.findText("自定义...")
+            if custom_idx >= 0:
+                self.formula_quick_combo.setCurrentIndex(custom_idx)
+
+        self.formula_quick_combo.blockSignals(False)
+        self._updating_formula_options = False
         
         # 同时更新公式输入框为默认公式（如果当前是旧格式或为空）
         current = self.formula_edit.text().strip()
@@ -1267,11 +1537,15 @@ class QtConfigPanel(QScrollArea):
         self.system_unique_values = unique_values
         for row in self.system_filter_rows:
             row.update_unique_values(unique_values)
+        for row in self.system_exception_rows:
+            row.update_unique_values(unique_values)
     
     def set_manual_unique_values(self, unique_values: Dict[str, List]):
         """设置手工表唯一值（用于筛选）"""
         self.manual_unique_values = unique_values
         for row in self.manual_filter_rows:
+            row.update_unique_values(unique_values)
+        for row in self.manual_exception_rows:
             row.update_unique_values(unique_values)
             
     def get_config(self) -> Dict[str, Any]:
@@ -1308,6 +1582,20 @@ class QtConfigPanel(QScrollArea):
                 }
                 manual_filters.append(f_converted)
         config["manual_filters"] = manual_filters
+
+        # 手工表例外保留
+        manual_filter_exceptions = []
+        for row in self.manual_exception_rows:
+            f = row.get_value()
+            if f:
+                from core.compare_engine import CompareEngine
+                f_converted = {
+                    "column": f["column"],
+                    "operator": CompareEngine.convert_operator(f["operator"]),
+                    "value": f["value"]
+                }
+                manual_filter_exceptions.append(f_converted)
+        config["manual_filter_exceptions"] = manual_filter_exceptions
         
         # 系统表筛选
         system_filters = []
@@ -1323,6 +1611,20 @@ class QtConfigPanel(QScrollArea):
                 }
                 system_filters.append(f_converted)
         config["system_filters"] = system_filters
+
+        # 系统表例外保留
+        system_filter_exceptions = []
+        for row in self.system_exception_rows:
+            f = row.get_value()
+            if f:
+                from core.compare_engine import CompareEngine
+                f_converted = {
+                    "column": f["column"],
+                    "operator": CompareEngine.convert_operator(f["operator"]),
+                    "value": f["value"]
+                }
+                system_filter_exceptions.append(f_converted)
+        config["system_filter_exceptions"] = system_filter_exceptions
         
         # 列清洗规则
         clean_rules = []
@@ -1403,6 +1705,13 @@ class QtConfigPanel(QScrollArea):
         # 差值公式
         formula = config.get("difference_formula", "M - S")
         self.formula_edit.setText(formula)
+
+        # 模板加载后，快速选择下拉重置为“自定义”，避免首项重复点击不触发
+        custom_idx = self.formula_quick_combo.findText("自定义...")
+        if custom_idx >= 0:
+            # 先置为无选择，再置为自定义，确保后续选择首项能触发
+            self.formula_quick_combo.setCurrentIndex(-1)
+            self.formula_quick_combo.setCurrentIndex(custom_idx)
         
         # 手工表筛选 - 先清空现有行
         for row in self.manual_filter_rows[:]:
@@ -1439,6 +1748,38 @@ class QtConfigPanel(QScrollArea):
                 "value": f.get("value", "")
             }
             self.system_filter_rows[-1].set_value(f_display)
+
+        # 手工表例外保留 - 先清空现有行
+        for row in self.manual_exception_rows[:]:
+            row.deleteLater()
+        self.manual_exception_rows.clear()
+
+        manual_filter_exceptions = config.get("manual_filter_exceptions", [])
+        for f in manual_filter_exceptions:
+            self._add_exception_row("manual")
+            op_reverse = {v: k for k, v in FilterRow.OPERATOR_MAP.items()}
+            f_display = {
+                "column": f.get("column", ""),
+                "operator": op_reverse.get(f.get("operator", ""), f.get("operator", "")),
+                "value": f.get("value", "")
+            }
+            self.manual_exception_rows[-1].set_value(f_display)
+
+        # 系统表例外保留 - 先清空现有行
+        for row in self.system_exception_rows[:]:
+            row.deleteLater()
+        self.system_exception_rows.clear()
+
+        system_filter_exceptions = config.get("system_filter_exceptions", [])
+        for f in system_filter_exceptions:
+            self._add_exception_row("system")
+            op_reverse = {v: k for k, v in FilterRow.OPERATOR_MAP.items()}
+            f_display = {
+                "column": f.get("column", ""),
+                "operator": op_reverse.get(f.get("operator", ""), f.get("operator", "")),
+                "value": f.get("value", "")
+            }
+            self.system_exception_rows[-1].set_value(f_display)
         
         # 列清洗规则 - 先清空现有行
         for row in self.clean_rows[:]:

@@ -269,6 +269,18 @@ class NoScrollComboBox(QComboBox):
         event.ignore()
 ```
 
+#### MultiSelectValueDialog
+
+```python
+class MultiSelectValueDialog(QDialog):
+    """筛选多值选择弹窗（用于包含于/不包含于）"""
+
+    # 特性：搜索、全选、清空、已选计数
+    # 交互：点击整行即可勾选/取消
+```
+
+> 筛选区新增「例外保留」行组，复用 `FilterRow` 组件。
+
 #### CollapsibleSection
 
 ```python

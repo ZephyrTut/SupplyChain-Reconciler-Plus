@@ -15,7 +15,7 @@ from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QFont, QIcon, QWheelEvent
 import pandas as pd
 
 from config.settings import APP_NAME, APP_VERSION
-from utils.excel_utils import get_sheet_names, load_excel
+from utils.excel_utils import get_sheet_names, load_excel, extract_unique_values
 from utils.storage import load_templates, save_template, delete_template
 from core.compare_engine import CompareEngine
 from core.export_engine import ExportEngine
@@ -272,6 +272,7 @@ class QtMainWindow(QMainWindow):
         self.system_path: str = ""
         self.result_df: Optional[pd.DataFrame] = None
         self.pivot_values: list = []  # 透视值列表
+        self._template_reload_guard: bool = False  # 防止模板列表刷新时递归触发
         
         # 响应式尺寸计算
         self._calculate_responsive_sizes()
@@ -880,35 +881,7 @@ class QtMainWindow(QMainWindow):
                 card.set_file(filepath, sheets)
                 
             self._update_step1_status()
-            
-            # 更新配置面板的列选项
-            if self.manual_df is not None and self.system_df is not None:
-                self.config_panel.set_columns(
-                    list(self.manual_df.columns),
-                    list(self.system_df.columns)
-                )
-                
-                # 设置手工表唯一值（用于筛选）
-                manual_unique_values = {}
-                for col in self.manual_df.columns:
-                    try:
-                        unique_vals = self.manual_df[col].dropna().unique().tolist()
-                        if len(unique_vals) <= 100:  # 限制唯一值数量
-                            manual_unique_values[col] = unique_vals
-                    except:
-                        pass
-                self.config_panel.set_manual_unique_values(manual_unique_values)
-                
-                # 设置系统表唯一值（用于透视列和筛选）
-                unique_values = {}
-                for col in self.system_df.columns:
-                    try:
-                        unique_vals = self.system_df[col].dropna().unique().tolist()
-                        if len(unique_vals) <= 100:  # 限制唯一值数量
-                            unique_values[col] = unique_vals
-                    except:
-                        pass
-                self.config_panel.set_system_unique_values(unique_values)
+            self._refresh_config_panel_metadata()
                 
         except Exception as e:
             from ui.qt_dialogs import show_error
@@ -927,38 +900,34 @@ class QtMainWindow(QMainWindow):
                 else:
                     self.system_df = df
                 self._update_step1_status()
-                
-                # 更新配置面板的列选项
-                if self.manual_df is not None and self.system_df is not None:
-                    self.config_panel.set_columns(
-                        list(self.manual_df.columns),
-                        list(self.system_df.columns)
-                    )
-                    
-                    # 设置手工表唯一值（用于筛选）
-                    manual_unique_values = {}
-                    for col in self.manual_df.columns:
-                        try:
-                            unique_vals = self.manual_df[col].dropna().unique().tolist()
-                            if len(unique_vals) <= 100:
-                                manual_unique_values[col] = unique_vals
-                        except:
-                            pass
-                    self.config_panel.set_manual_unique_values(manual_unique_values)
-                    
-                    # 设置系统表唯一值（用于透视列和筛选）
-                    unique_values = {}
-                    for col in self.system_df.columns:
-                        try:
-                            unique_vals = self.system_df[col].dropna().unique().tolist()
-                            if len(unique_vals) <= 100:
-                                unique_values[col] = unique_vals
-                        except:
-                            pass
-                    self.config_panel.set_system_unique_values(unique_values)
+                self._refresh_config_panel_metadata()
             except Exception as e:
                 from ui.qt_dialogs import show_warning
                 show_warning(self, "加载失败", f"无法加载工作表:\n{str(e)}")
+
+    def _refresh_config_panel_metadata(self):
+        """刷新配置面板列信息与筛选唯一值。"""
+        manual_columns = list(self.manual_df.columns) if self.manual_df is not None else []
+        system_columns = list(self.system_df.columns) if self.system_df is not None else []
+
+        self.config_panel.set_columns(manual_columns, system_columns)
+
+        manual_unique_values = extract_unique_values(self.manual_df) if self.manual_df is not None else {}
+        system_unique_values = extract_unique_values(self.system_df) if self.system_df is not None else {}
+
+        self.config_panel.set_manual_unique_values(manual_unique_values)
+        self.config_panel.set_system_unique_values(system_unique_values)
+
+    def _build_filter_tuples(self, filters: list) -> list:
+        """将配置中的筛选规则转换为引擎可用元组。"""
+        tuples = []
+        for f in filters or []:
+            column = f.get("column")
+            operator = f.get("operator")
+            value = f.get("value")
+            if column and operator:
+                tuples.append((column, operator, value))
+        return tuples
             
     def _go_prev(self):
         """上一步"""
@@ -993,12 +962,20 @@ class QtMainWindow(QMainWindow):
             
             # 准备配置参数
             key_mappings = config.get("key_mappings", [])
-            manual_key_cols = [k["manual"] for k in key_mappings]
-            system_key_cols = [k["system"] for k in key_mappings]
+            manual_key_cols = [
+                (k.get("manual") or k.get("manual_col"))
+                for k in key_mappings
+                if isinstance(k, dict) and (k.get("manual") or k.get("manual_col"))
+            ]
+            system_key_cols = [
+                (k.get("system") or k.get("system_col"))
+                for k in key_mappings
+                if isinstance(k, dict) and (k.get("system") or k.get("system_col"))
+            ]
             
             value_mapping = config.get("value_mapping", {})
-            manual_val_col = value_mapping.get("manual", "")
-            system_val_col = value_mapping.get("system", "")
+            manual_val_col = value_mapping.get("manual", "") or value_mapping.get("manual_col", "")
+            system_val_col = value_mapping.get("system", "") or value_mapping.get("system_col", "")
             
             # 透视列配置
             pivot_config = config.get("pivot_column", {})
@@ -1023,13 +1000,11 @@ class QtMainWindow(QMainWindow):
             system_with_key = CompareEngine.make_key(system_data, system_key_cols)
             
             # 准备筛选条件
-            manual_filters = []
-            for f in config.get("manual_filters", []):
-                manual_filters.append((f["column"], f["operator"], f["value"]))
-            
-            system_filters = []
-            for f in config.get("system_filters", []):
-                system_filters.append((f["column"], f["operator"], f["value"]))
+            manual_filters = self._build_filter_tuples(config.get("manual_filters", []))
+            manual_filter_exceptions = self._build_filter_tuples(config.get("manual_filter_exceptions", []))
+
+            system_filters = self._build_filter_tuples(config.get("system_filters", []))
+            system_filter_exceptions = self._build_filter_tuples(config.get("system_filter_exceptions", []))
             
             # 聚合数据
             # 手工表聚合 - 检查是否有手工表透视配置
@@ -1038,7 +1013,8 @@ class QtMainWindow(QMainWindow):
                 manual_agg, out_cols, in_cols = CompareEngine.aggregate_manual_with_pivot(
                     manual_with_key, "__KEY__", manual_val_col,
                     manual_pivot,
-                    filters=manual_filters
+                    filters=manual_filters,
+                    filter_exceptions=manual_filter_exceptions
                 )
                 # 保存手工表透视信息（用于结果显示）
                 self.manual_pivot_info = {"out_cols": out_cols, "in_cols": in_cols}
@@ -1046,14 +1022,16 @@ class QtMainWindow(QMainWindow):
                 # 普通聚合
                 manual_agg, _ = CompareEngine.aggregate_data(
                     manual_with_key, "__KEY__", [manual_val_col] if manual_val_col else [],
-                    filters=manual_filters
+                    filters=manual_filters,
+                    filter_exceptions=manual_filter_exceptions
                 )
                 self.manual_pivot_info = None
             
             system_agg, pivot_values = CompareEngine.aggregate_data(
                 system_with_key, "__KEY__", [system_val_col] if system_val_col else [],
                 pivot_col=pivot_col if pivot_col else None,
-                filters=system_filters
+                filters=system_filters,
+                filter_exceptions=system_filter_exceptions
             )
             
             # 保存透视值
@@ -1066,10 +1044,6 @@ class QtMainWindow(QMainWindow):
             # 获取字母公式并转换为列名公式
             letter_formula = config.get("difference_formula", "")
             
-            # 调试输出
-            print(f"[DEBUG] letter_formula: {letter_formula}")
-            print(f"[DEBUG] pivot_col: {pivot_col}")
-            print(f"[DEBUG] pivot_values: {pivot_values}")
             
             # 构建字母到列名的映射
             # 新列顺序: A=__KEY__, [B,C,D...=透视列], 系统总计, 手工数量, 差值, 比对状态
@@ -1090,7 +1064,6 @@ class QtMainWindow(QMainWindow):
                 letter_to_column["B"] = "系统总计"
                 letter_to_column["C"] = "手工数量"
             
-            print(f"[DEBUG] letter_to_column: {letter_to_column}")
             
             # 将字母公式转换为列名公式
             column_formula = letter_formula
@@ -1099,7 +1072,6 @@ class QtMainWindow(QMainWindow):
                 column_name = letter_to_column[letter]
                 column_formula = column_formula.replace(letter, column_name)
             
-            print(f"[DEBUG] column_formula: {column_formula}")
             
             # 合并比对
             self.result_df = CompareEngine.merge_and_compare(
@@ -1125,22 +1097,13 @@ class QtMainWindow(QMainWindow):
         except Exception as e:
             if loading:
                 loading.close()
-            import traceback
-            traceback.print_exc()
-            print(f"[ERROR] 对账失败: {e}")
             from ui.qt_dialogs import show_error
             show_error(self, "对账失败", f"执行对账时出错:\n{str(e)}")
             
     def _update_stats(self):
         """更新统计信息"""
         if self.result_df is None:
-            print("[DEBUG] _update_stats: result_df is None")
             return
-        
-        print(f"[DEBUG] _update_stats: result_df has {len(self.result_df)} rows")
-        print(f"[DEBUG] result_df columns: {list(self.result_df.columns)}")
-        if len(self.result_df) > 0:
-            print(f"[DEBUG] result_df head:\n{self.result_df.head()}")
             
         total = len(self.result_df)
         # 使用 str.startswith 来匹配状态（因为状态是 "✓ 一致" 这样的完整字符串）
@@ -1149,7 +1112,6 @@ class QtMainWindow(QMainWindow):
         diff = len(self.result_df[status_col.str.startswith('↕')])
         missing = len(self.result_df[status_col.str.startswith('✗')])
         
-        print(f"[DEBUG] Stats: total={total}, match={match}, diff={diff}, missing={missing}")
         
         # 查找标签
         stat_total = self.findChild(QLabel, "stat_总计")
@@ -1157,7 +1119,6 @@ class QtMainWindow(QMainWindow):
         stat_diff = self.findChild(QLabel, "stat_差异")
         stat_missing = self.findChild(QLabel, "stat_缺失")
         
-        print(f"[DEBUG] Found labels: total={stat_total}, match={stat_match}, diff={stat_diff}, missing={stat_missing}")
         
         if stat_total:
             stat_total.setText(str(total))
@@ -1170,14 +1131,10 @@ class QtMainWindow(QMainWindow):
         
     def _export_results(self):
         """导出结果"""
-        print("[DEBUG] _export_results called")
         if self.result_df is None:
-            print("[DEBUG] result_df is None, returning")
             from ui.qt_dialogs import show_warning
             show_warning(self, "无数据", "没有对账结果可导出")
             return
-        
-        print(f"[DEBUG] result_df has {len(self.result_df)} rows")
             
         filepath, _ = QFileDialog.getSaveFileName(
             self,
@@ -1185,8 +1142,6 @@ class QtMainWindow(QMainWindow):
             f"对账结果_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             "Excel文件 (*.xlsx)"
         )
-        
-        print(f"[DEBUG] filepath: {filepath}")
         
         if filepath:
             try:
@@ -1213,16 +1168,52 @@ class QtMainWindow(QMainWindow):
             
     def _on_template_selected(self, index: int):
         """模板选择事件"""
+        if self._template_reload_guard:
+            return
         if index <= 0:
             return
         template = self.template_combo.itemData(index)
         if template:
             config = template.get("config", {})
             self.config_panel.set_config(config)
+            # 模板加载后主动刷新预览与公式快速选择
+            self._on_config_changed()
+            # 模板加载后自动回写更新（基于当前两表数据）
+            self._auto_writeback_loaded_template(template)
+
+    def _auto_writeback_loaded_template(self, template: dict):
+        """加载模板后自动回写更新（仅在两表都已导入时执行）。"""
+        if self.manual_df is None or self.system_df is None:
+            return
+
+        template_name = template.get("name", "") if isinstance(template, dict) else ""
+        if not template_name:
+            return
+
+        old_config = template.get("config", {}) if isinstance(template, dict) else {}
+        new_config = self.config_panel.get_config()
+
+        # 没变化则不写盘
+        if new_config == old_config:
+            return
+
+        ok = save_template(template_name, new_config)
+        if not ok:
+            return
+
+        # 刷新模板列表并保持当前选中，避免UI显示旧itemData
+        self._template_reload_guard = True
+        try:
+            self._load_templates()
+            idx = self.template_combo.findText(template_name)
+            if idx >= 0:
+                self.template_combo.setCurrentIndex(idx)
+        finally:
+            self._template_reload_guard = False
             
     def _save_template(self):
         """保存模板"""
-        from ui.qt_dialogs import InputDialog, show_info
+        from ui.qt_dialogs import InputDialog, show_info, show_warning
         
         # 获取已有模板名称列表
         templates = load_templates()
@@ -1239,7 +1230,10 @@ class QtMainWindow(QMainWindow):
             name = dialog.get_text()
             if name:
                 config = self.config_panel.get_config()
-                save_template(name, config)
+                ok = save_template(name, config)
+                if not ok:
+                    show_warning(self, "保存失败", "模板保存失败，请检查模板名称或文件权限")
+                    return
                 self._load_templates()
                 # 选中新模板
                 index = self.template_combo.findText(name)
@@ -1345,7 +1339,6 @@ class QtMainWindow(QMainWindow):
         ws2.cell(row=1, column=1, value="【清洗规则】").font = Font(bold=True, size=12, color="FF0000")
         
         if clean_rules:
-            from core.compare_engine import CompareEngine
             for i, rule in enumerate(clean_rules):
                 mode_text = f"{rule['column']}: {rule['mode']} 正则'{rule.get('regexes', [])}'"
                 if rule.get('replace'):
@@ -1386,18 +1379,27 @@ class QtMainWindow(QMainWindow):
             
             # 执行透视计算
             key_mappings = config.get("key_mappings", [])
-            manual_key_cols = [k["manual"] for k in key_mappings if k.get("manual")]
+            manual_key_cols = [
+                (k.get("manual") or k.get("manual_col"))
+                for k in key_mappings
+                if isinstance(k, dict) and (k.get("manual") or k.get("manual_col"))
+            ]
             value_mapping = config.get("value_mapping", {})
-            manual_val_col = value_mapping.get("manual", "")
+            manual_val_col = value_mapping.get("manual", "") or value_mapping.get("manual_col", "")
             
             if manual_key_cols and manual_val_col:
-                from core.compare_engine import CompareEngine
                 manual_with_key = CompareEngine.make_key(df_cleaned, manual_key_cols)
-                manual_filters = [(f["column"], f["operator"], f["value"]) for f in config.get("manual_filters", [])]
+                manual_filters = self._build_filter_tuples(config.get("manual_filters", []))
+                manual_filter_exceptions = self._build_filter_tuples(config.get("manual_filter_exceptions", []))
                 
                 try:
                     pivot_df, out_cols, in_cols = CompareEngine.aggregate_manual_with_pivot(
-                        manual_with_key, "__KEY__", manual_val_col, manual_pivot, manual_filters
+                        manual_with_key,
+                        "__KEY__",
+                        manual_val_col,
+                        manual_pivot,
+                        filters=manual_filters,
+                        filter_exceptions=manual_filter_exceptions
                     )
                     
                     start_row = 7
@@ -1496,30 +1498,36 @@ class QtMainWindow(QMainWindow):
         # === Sheet2: 筛选后数据 ===
         ws2 = wb.create_sheet("2-筛选后数据")
         system_filters = config.get("system_filters", [])
+        system_filter_exceptions = config.get("system_filter_exceptions", [])
         df_filtered = df_original.copy()
         
         ws2.cell(row=1, column=1, value="【筛选规则】").font = Font(bold=True, size=12, color="FF0000")
         
-        if system_filters:
-            filter_tuples = [(f["column"], f["operator"], f["value"]) for f in system_filters]
-            for i, f in enumerate(system_filters):
-                ws2.cell(row=2+i, column=1, value=f"规则{i+1}: {f['column']} {f['operator']} '{f['value']}'")
+        if system_filters or system_filter_exceptions:
+            filter_tuples = self._build_filter_tuples(system_filters)
+            exception_tuples = self._build_filter_tuples(system_filter_exceptions)
+
+            for i, (col, op, val) in enumerate(filter_tuples):
+                ws2.cell(row=2 + i, column=1, value=f"规则{i+1}: {col} {op} '{val}'")
+
+            offset = len(filter_tuples)
+            for j, (col, op, val) in enumerate(exception_tuples):
+                ws2.cell(
+                    row=2 + offset + j,
+                    column=1,
+                    value=f"例外{j+1}: {col} {op} '{val}'"
+                )
+
+            # 应用筛选条件（主筛选AND + 例外保留OR）
+            df_filtered = CompareEngine.apply_filters(
+                df_filtered,
+                filter_tuples,
+                exception_tuples
+            )
             
-            # 应用筛选条件
-            for col, op, val in filter_tuples:
-                if col not in df_filtered.columns:
-                    continue
-                if op == "等于":
-                    df_filtered = df_filtered[df_filtered[col].astype(str) == str(val)]
-                elif op == "不等于":
-                    df_filtered = df_filtered[df_filtered[col].astype(str) != str(val)]
-                elif op == "包含":
-                    df_filtered = df_filtered[df_filtered[col].astype(str).str.contains(str(val), na=False)]
-                elif op == "不包含":
-                    df_filtered = df_filtered[~df_filtered[col].astype(str).str.contains(str(val), na=False)]
-            
-            ws2.cell(row=2+len(system_filters), column=1, value=f"筛选后剩余 {len(df_filtered)} 行")
-            start_row = 4 + len(system_filters)
+            line_count = len(filter_tuples) + len(exception_tuples)
+            ws2.cell(row=2 + line_count, column=1, value=f"筛选后剩余 {len(df_filtered)} 行")
+            start_row = 4 + line_count
         else:
             ws2.cell(row=2, column=1, value="（无筛选规则）")
             start_row = 4
@@ -1539,21 +1547,26 @@ class QtMainWindow(QMainWindow):
         pivot_config = config.get("pivot_column", {})
         pivot_col = pivot_config.get("system") if isinstance(pivot_config, dict) else pivot_config
         pivot_values = config.get("pivot_values", [])
+        if not isinstance(pivot_values, (list, tuple)):
+            pivot_values = []
         
         ws3.cell(row=1, column=1, value="【系统表透视配置】").font = Font(bold=True, size=12, color="2E7D32")
         
         if pivot_col:
             ws3.cell(row=2, column=1, value=f"透视列: {pivot_col}")
-            ws3.cell(row=3, column=1, value=f"透视值: {', '.join(pivot_values) if pivot_values else '(全部)'}")
+            ws3.cell(row=3, column=1, value=f"透视值: {', '.join(map(str, pivot_values)) if pivot_values else '(全部)'}")
             
             # 执行透视计算
             key_mappings = config.get("key_mappings", [])
-            system_key_cols = [k["system"] for k in key_mappings if k.get("system")]
+            system_key_cols = [
+                (k.get("system") or k.get("system_col"))
+                for k in key_mappings
+                if isinstance(k, dict) and (k.get("system") or k.get("system_col"))
+            ]
             value_mapping = config.get("value_mapping", {})
-            system_val_col = value_mapping.get("system", "")
+            system_val_col = value_mapping.get("system", "") or value_mapping.get("system_col", "")
             
             if system_key_cols and system_val_col:
-                from core.compare_engine import CompareEngine
                 system_with_key = CompareEngine.make_key(df_filtered, system_key_cols)
                 
                 try:
@@ -1590,12 +1603,15 @@ class QtMainWindow(QMainWindow):
             
             # 如果没有透视，显示按主键汇总的结果
             key_mappings = config.get("key_mappings", [])
-            system_key_cols = [k["system"] for k in key_mappings if k.get("system")]
+            system_key_cols = [
+                (k.get("system") or k.get("system_col"))
+                for k in key_mappings
+                if isinstance(k, dict) and (k.get("system") or k.get("system_col"))
+            ]
             value_mapping = config.get("value_mapping", {})
-            system_val_col = value_mapping.get("system", "")
+            system_val_col = value_mapping.get("system", "") or value_mapping.get("system_col", "")
             
             if system_key_cols and system_val_col:
-                from core.compare_engine import CompareEngine
                 system_with_key = CompareEngine.make_key(df_filtered, system_key_cols)
                 
                 # 按主键汇总

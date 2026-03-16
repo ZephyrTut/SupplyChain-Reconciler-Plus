@@ -2,7 +2,7 @@
 Excel 工具模块 - 文件读取和Sheet处理
 """
 import pandas as pd
-from typing import List, Optional
+from typing import Dict, List, Optional
 import os
 
 
@@ -173,3 +173,51 @@ def preview_data(filepath: str, sheet_name: str,
         "data": df.head(rows).to_dict('records'),
         "total_rows": len(df)
     }
+
+
+def extract_unique_values(
+    df: pd.DataFrame,
+    max_values_per_column: int = 200
+) -> Dict[str, List[str]]:
+    """
+    提取每列唯一值（用于筛选下拉/多选）。
+
+    规则：
+    - 对字符串值执行 strip，移除首尾空格
+    - 过滤空值与空字符串
+    - 保持出现顺序去重
+    - 每列最多返回 max_values_per_column 个值
+    """
+    unique_values: Dict[str, List[str]] = {}
+
+    if df is None or df.empty:
+        return unique_values
+
+    for col in df.columns:
+        try:
+            series = df[col].dropna()
+            if series.empty:
+                continue
+
+            values = []
+            seen = set()
+
+            for item in series.tolist():
+                text = str(item).strip()
+                if not text or text.lower() == "nan":
+                    continue
+                if text in seen:
+                    continue
+
+                seen.add(text)
+                values.append(text)
+
+                if len(values) >= max_values_per_column:
+                    break
+
+            if values:
+                unique_values[str(col)] = values
+        except Exception:
+            continue
+
+    return unique_values

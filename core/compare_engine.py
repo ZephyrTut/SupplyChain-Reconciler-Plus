@@ -17,6 +17,7 @@ class CompareEngine:
         "包含": "CONTAINS",
         "不包含": "NOT_CONTAINS",
         "包含于": "IN_LIST",
+        "不包含于": "NOT_IN_LIST",
         "大于": "GREATER",
         "小于": "LESS"
     }
@@ -89,7 +90,8 @@ class CompareEngine:
         key_col: str,
         value_col: str,
         pivot_config: Dict,
-        filters: Optional[List[Tuple[str, str, str]]] = None
+        filters: Optional[List[Tuple[str, str, str]]] = None,
+        filter_exceptions: Optional[List[Tuple[str, str, str]]] = None
     ) -> Tuple[pd.DataFrame, List[str], List[str]]:
         """
         手工表透视聚合（区分出库/入库）
@@ -119,33 +121,9 @@ class CompareEngine:
             return df, [], []
             
         df = df.copy()
-        
-        # 应用筛选条件
-        if filters:
-            for col, op, val in filters:
-                if col not in df.columns:
-                    continue
-                col_data = df[col].astype(str)
-                if op == "EQUALS":
-                    df = df[col_data == val]
-                elif op == "NOT_EQUALS":
-                    df = df[col_data != val]
-                elif op == "CONTAINS":
-                    if isinstance(val, str):
-                        values = [v.strip() for v in val.replace('；', ';').replace('，', ',').replace(';', ',').split(',') if v.strip()]
-                    else:
-                        values = [str(val)]
-                    if values:
-                        mask = col_data.str.contains(values[0], na=False, regex=False)
-                        for v in values[1:]:
-                            mask = mask | col_data.str.contains(v, na=False, regex=False)
-                        df = df[mask]
-                elif op == "IN_LIST":
-                    if isinstance(val, str):
-                        values = [v.strip() for v in val.replace('；', ';').replace('，', ',').replace(';', ',').split(',') if v.strip()]
-                    else:
-                        values = [str(val)]
-                    df = df[col_data.isin(values)]
+
+        # 应用筛选条件（主筛选AND + 例外保留OR）
+        df = CompareEngine.apply_filters(df, filters, filter_exceptions)
         
         # 转换数值列
         if value_col in df.columns:
@@ -219,7 +197,8 @@ class CompareEngine:
         key_col: str,
         value_cols: List[str],
         pivot_col: Optional[str] = None,
-        filters: Optional[List[Tuple[str, str, str]]] = None
+        filters: Optional[List[Tuple[str, str, str]]] = None,
+        filter_exceptions: Optional[List[Tuple[str, str, str]]] = None
     ) -> Tuple[pd.DataFrame, List[str]]:
         """
         聚合数据，支持透视
@@ -235,64 +214,9 @@ class CompareEngine:
             (聚合后的 DataFrame, 透视值列表)
         """
         df = df.copy()
-        
-        # 应用筛选条件
-        if filters:
-            for col, op, val in filters:
-                if col not in df.columns:
-                    continue
-                col_data = df[col].astype(str)
-                if op == "EQUALS":
-                    df = df[col_data == val]
-                elif op == "NOT_EQUALS":
-                    df = df[col_data != val]
-                elif op == "CONTAINS":
-                    # 支持多值筛选（逗号或分号分隔，满足任一即可）
-                    if isinstance(val, str):
-                        values = [v.strip() for v in val.replace('；', ';').replace('，', ',').replace(';', ',').split(',') if v.strip()]
-                    else:
-                        values = [str(val)]
-                    if values:
-                        mask = col_data.str.contains(values[0], na=False, regex=False)
-                        for v in values[1:]:
-                            mask = mask | col_data.str.contains(v, na=False, regex=False)
-                        df = df[mask]
-                elif op == "NOT_CONTAINS":
-                    # 支持多值筛选（不包含任何一个值）
-                    if isinstance(val, str):
-                        values = [v.strip() for v in val.replace('；', ';').replace('，', ',').replace(';', ',').split(',') if v.strip()]
-                    else:
-                        values = [str(val)]
-                    if values:
-                        mask = ~col_data.str.contains(values[0], na=False, regex=False)
-                        for v in values[1:]:
-                            mask = mask & ~col_data.str.contains(v, na=False, regex=False)
-                        df = df[mask]
-                elif op == "IN_LIST":
-                    # 支持多值筛选（逗号或分号分隔）
-                    if isinstance(val, str):
-                        # 统一处理中英文逗号和分号
-                        values = [v.strip() for v in val.replace('；', ';').replace('，', ',').replace(';', ',').split(',') if v.strip()]
-                    else:
-                        values = [str(val)]
-                    df = df[col_data.isin(values)]
-                elif op == "NOT_IN_LIST":
-                    # 不包含于：不在列表中的记录
-                    if isinstance(val, str):
-                        values = [v.strip() for v in val.replace('；', ';').replace('，', ',').replace(';', ',').split(',') if v.strip()]
-                    else:
-                        values = [str(val)]
-                    df = df[~col_data.isin(values)]
-                elif op == "GREATER":
-                    try:
-                        df = df[pd.to_numeric(df[col], errors='coerce') > float(val)]
-                    except:
-                        pass
-                elif op == "LESS":
-                    try:
-                        df = df[pd.to_numeric(df[col], errors='coerce') < float(val)]
-                    except:
-                        pass
+
+        # 应用筛选条件（主筛选AND + 例外保留OR）
+        df = CompareEngine.apply_filters(df, filters, filter_exceptions)
         
         # 转换数值列
         for col in value_cols:
@@ -343,6 +267,90 @@ class CompareEngine:
         # 只返回唯一键
         result = df[[key_col]].drop_duplicates()
         return result, pivot_values
+
+    @staticmethod
+    def _split_filter_values(val: Any) -> List[str]:
+        """将筛选值统一解析为字符串列表。"""
+        if isinstance(val, str):
+            return [
+                v.strip() for v in val.replace('；', ';').replace('，', ',').replace(';', ',').split(',')
+                if v.strip()
+            ]
+        if val is None:
+            return []
+        return [str(val).strip()]
+
+    @staticmethod
+    def _build_filter_mask(df: pd.DataFrame, col: str, op: str, val: Any) -> pd.Series:
+        """构建单条筛选规则掩码。"""
+        if col not in df.columns:
+            return pd.Series([True] * len(df), index=df.index)
+
+        col_data = df[col].astype(str)
+        values = CompareEngine._split_filter_values(val)
+
+        if op == "EQUALS":
+            return col_data == str(val)
+        if op == "NOT_EQUALS":
+            return col_data != str(val)
+        if op == "CONTAINS":
+            if not values:
+                return pd.Series([True] * len(df), index=df.index)
+            mask = col_data.str.contains(values[0], na=False, regex=False)
+            for v in values[1:]:
+                mask = mask | col_data.str.contains(v, na=False, regex=False)
+            return mask
+        if op == "NOT_CONTAINS":
+            if not values:
+                return pd.Series([True] * len(df), index=df.index)
+            mask = ~col_data.str.contains(values[0], na=False, regex=False)
+            for v in values[1:]:
+                mask = mask & ~col_data.str.contains(v, na=False, regex=False)
+            return mask
+        if op == "IN_LIST":
+            return col_data.isin(values)
+        if op == "NOT_IN_LIST":
+            return ~col_data.isin(values)
+        if op == "GREATER":
+            try:
+                return pd.to_numeric(df[col], errors='coerce') > float(val)
+            except Exception:
+                return pd.Series([True] * len(df), index=df.index)
+        if op == "LESS":
+            try:
+                return pd.to_numeric(df[col], errors='coerce') < float(val)
+            except Exception:
+                return pd.Series([True] * len(df), index=df.index)
+
+        # 未知操作符时不拦截
+        return pd.Series([True] * len(df), index=df.index)
+
+    @staticmethod
+    def apply_filters(
+        df: pd.DataFrame,
+        filters: Optional[List[Tuple[str, str, str]]] = None,
+        filter_exceptions: Optional[List[Tuple[str, str, str]]] = None
+    ) -> pd.DataFrame:
+        """
+        应用筛选：主筛选AND，例外保留OR，最终为主筛选 OR 例外保留。
+        """
+        if df is None or df.empty:
+            return df
+
+        filters = filters or []
+        filter_exceptions = filter_exceptions or []
+
+        main_mask = pd.Series([True] * len(df), index=df.index)
+        if filters:
+            for col, op, val in filters:
+                main_mask = main_mask & CompareEngine._build_filter_mask(df, col, op, val)
+
+        exception_mask = pd.Series([False] * len(df), index=df.index)
+        if filter_exceptions:
+            for col, op, val in filter_exceptions:
+                exception_mask = exception_mask | CompareEngine._build_filter_mask(df, col, op, val)
+
+        return df[main_mask | exception_mask]
 
     @staticmethod
     def merge_and_compare(

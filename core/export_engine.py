@@ -44,7 +44,20 @@ class ExportEngine:
         
         # 准备导出列
         export_cols = ExportEngine._get_export_columns(result_df, pivot_values)
-        export_df = result_df[export_cols].copy() if all(c in result_df.columns for c in export_cols) else result_df.copy()
+        available_cols = [c for c in export_cols if c in result_df.columns]
+        export_df = result_df[available_cols].copy() if available_cols else result_df.copy()
+
+        # 排序，确保完整结果表稳定可核对
+        if "__KEY__" in export_df.columns:
+            export_df = export_df.sort_values(by="__KEY__", kind="stable").reset_index(drop=True)
+
+        # 统一缺失值处理：状态和主键保留文本，其余列空值按0填充便于核对
+        for col in export_df.columns:
+            if col in ["__KEY__", "比对状态"]:
+                export_df[col] = export_df[col].fillna("")
+                continue
+            if pd.api.types.is_numeric_dtype(export_df[col]):
+                export_df[col] = export_df[col].fillna(0)
         
         # 写入数据
         ExportEngine._write_dataframe(ws_all, export_df)

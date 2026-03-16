@@ -81,7 +81,8 @@ df = CompareEngine.clean_column(df, rules)
 @staticmethod
 def apply_filters(
     df: pd.DataFrame,
-    filters: List[dict]
+    filters: List[dict],
+    filter_exceptions: List[dict] = None
 ) -> pd.DataFrame:
 ```
 
@@ -100,6 +101,12 @@ def apply_filters(
     "operator": str,    # 操作符
     "value": str        # 筛选值
 }
+
+**例外保留逻辑**:
+
+$$
+最终结果 = 主筛选(AND) \lor 例外保留(OR)
+$$
 ```
 
 **操作符映射**:

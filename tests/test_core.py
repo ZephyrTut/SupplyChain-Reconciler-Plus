@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import CompareEngine, ExportEngine
-from utils import load_excel, get_sheet_names
+from utils import load_excel, get_sheet_names, extract_unique_values
 from config import COMPARE_STATUS
 
 
@@ -155,6 +155,33 @@ class TestExcelUtils(unittest.TestCase):
         self.assertEqual(len(df), 3)
         self.assertIn("A", df.columns)
         self.assertIn("B", df.columns)
+
+    def test_extract_unique_values(self):
+        """测试唯一值提取（去重+去空格）"""
+        df = pd.DataFrame({
+            "状态": [" 已入库", "部分入库", "部分入库", None, ""],
+            "数量": [1, 2, 2, 3, 4]
+        })
+
+        result = extract_unique_values(df, max_values_per_column=10)
+        self.assertIn("状态", result)
+        self.assertEqual(result["状态"], ["已入库", "部分入库"])
+
+    def test_extract_status_values_from_system_sample(self):
+        """测试从系统样例文件识别状态值"""
+        sample_path = os.path.join(
+            "tests", "data", "送货单执行报表 (73) (2).xlsx"
+        )
+        if not os.path.exists(sample_path):
+            self.skipTest("样例文件不存在，跳过状态识别测试")
+
+        df = load_excel(sample_path, "Sheet1")
+        result = extract_unique_values(df, max_values_per_column=200)
+
+        self.assertIn("送货单行状态", result)
+        status_values = set(result["送货单行状态"])
+        self.assertIn("已入库", status_values)
+        self.assertIn("部分入库", status_values)
 
 
 class TestIntegration(unittest.TestCase):

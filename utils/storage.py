@@ -7,6 +7,44 @@ from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 
+APP_DIR_NAME = "SupplyChain-Reconciler-Plus"
+LEGACY_APP_DIR_NAME = "SupplyChain-Reconciler"
+
+
+def _make_json_safe(value: Any) -> Any:
+    """将对象转换为可 JSON 序列化的数据。"""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _make_json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_make_json_safe(v) for v in value]
+
+    # 兼容 datetime / pandas / numpy 等对象
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+
+    return str(value)
+
+
+def _migrate_legacy_files(new_dir: Path, legacy_dir: Path) -> None:
+    """将旧目录中的配置文件迁移到新目录（仅在新目录不存在对应文件时）。"""
+    if not legacy_dir.exists():
+        return
+
+    for filename in ["config.json", "templates.json"]:
+        src = legacy_dir / filename
+        dst = new_dir / filename
+        if src.exists() and not dst.exists():
+            try:
+                dst.write_text(src.read_text(encoding='utf-8'), encoding='utf-8')
+            except Exception:
+                continue
+
+
 def get_config_dir() -> Path:
     """获取配置目录"""
     # 使用用户数据目录
@@ -14,9 +52,13 @@ def get_config_dir() -> Path:
         base = os.environ.get("APPDATA", os.path.expanduser("~"))
     else:  # macOS/Linux
         base = os.path.expanduser("~/.config")
-    
-    config_dir = Path(base) / "SupplyChain-Reconciler"
+
+    config_dir = Path(base) / APP_DIR_NAME
     config_dir.mkdir(parents=True, exist_ok=True)
+
+    # 兼容旧版本目录迁移
+    legacy_dir = Path(base) / LEGACY_APP_DIR_NAME
+    _migrate_legacy_files(config_dir, legacy_dir)
     
     return config_dir
 
@@ -84,7 +126,15 @@ def load_templates() -> List[Dict[str, Any]]:
     
     try:
         with open(templates_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+
+        # 新旧格式兼容
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            templates = data.get("templates", [])
+            return templates if isinstance(templates, list) else []
+        return []
     except:
         return []
 
@@ -104,6 +154,14 @@ def save_template(name: str, config: Dict[str, Any]) -> bool:
     from datetime import datetime
     
     templates = load_templates()
+    if not isinstance(templates, list):
+        templates = []
+
+    name = str(name).strip()
+    if not name:
+        return False
+
+    safe_config = _make_json_safe(config)
     
     # 查找是否存在同名模板
     found = False
@@ -112,7 +170,7 @@ def save_template(name: str, config: Dict[str, Any]) -> bool:
             # 更新模板：保留id（如果有），更新config和timestamp
             if "id" not in t:
                 t["id"] = str(uuid.uuid4())
-            t["config"] = config
+            t["config"] = safe_config
             t["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             found = True
             break
@@ -121,7 +179,7 @@ def save_template(name: str, config: Dict[str, Any]) -> bool:
         templates.append({
             "id": str(uuid.uuid4()),
             "name": name,
-            "config": config,
+            "config": safe_config,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         })
     

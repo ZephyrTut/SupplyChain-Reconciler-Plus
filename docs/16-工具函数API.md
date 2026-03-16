@@ -281,6 +281,8 @@ def get_active_excel_path() -> Optional[str]:
 # Linux: ~/.config/SupplyChain-Reconciler-Plus/
 ```
 
+兼容说明：若存在旧目录 `SupplyChain-Reconciler`，会自动迁移模板与配置文件。
+
 ---
 
 ### save_template()
