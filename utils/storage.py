@@ -3,6 +3,7 @@
 """
 import json
 import os
+import sys
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
@@ -45,6 +46,41 @@ def _migrate_legacy_files(new_dir: Path, legacy_dir: Path) -> None:
                 continue
 
 
+def _resolve_default_templates_path() -> Optional[Path]:
+    """解析默认模板文件路径（源码运行与打包运行均兼容）。"""
+    candidates: List[Path] = []
+
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        candidates.append(Path(getattr(sys, '_MEIPASS')) / 'templates.json')
+
+    project_root = Path(__file__).resolve().parent.parent
+    candidates.append(project_root / 'templates.json')
+    candidates.append(Path.cwd() / 'templates.json')
+
+    for path in candidates:
+        if path.exists() and path.is_file():
+            return path
+    return None
+
+
+def _ensure_default_templates(config_dir: Path) -> None:
+    """首次运行时，若用户目录缺少模板文件则写入默认 templates.json。"""
+    target = config_dir / 'templates.json'
+    if target.exists():
+        return
+
+    source = _resolve_default_templates_path()
+    if source is None:
+        return
+
+    try:
+        data = source.read_text(encoding='utf-8')
+        json.loads(data)
+        target.write_text(data, encoding='utf-8')
+    except Exception:
+        return
+
+
 def get_config_dir() -> Path:
     """获取配置目录"""
     # 使用用户数据目录
@@ -59,6 +95,7 @@ def get_config_dir() -> Path:
     # 兼容旧版本目录迁移
     legacy_dir = Path(base) / LEGACY_APP_DIR_NAME
     _migrate_legacy_files(config_dir, legacy_dir)
+    _ensure_default_templates(config_dir)
     
     return config_dir
 

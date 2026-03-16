@@ -87,15 +87,9 @@ jobs:
           shell: pwsh
           command: |
             $upxDir = Split-Path -Parent (Get-Command upx -ErrorAction Stop).Source
-            pyinstaller --noconfirm --clean --onefile --windowed `
-              --name ${{ env.APP_NAME }} `
+            pyinstaller --noconfirm --clean `
               --upx-dir "$upxDir" `
-              --exclude-module IPython `
-              --exclude-module jupyter `
-              --exclude-module matplotlib `
-              --exclude-module pytest `
-              --exclude-module scipy `
-              main.py
+              "SupplyChain-Reconciler-Plus.spec"
 
       - name: Package and generate hashes
         shell: pwsh

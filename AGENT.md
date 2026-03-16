@@ -227,6 +227,6 @@ docs/*.md (权威) → .github/copilot-instructions.md (约束)
 
 ---
 
-**文档版本**: 1.4.3  
-**最后更新**: 2026年1月11日  
+**文档版本**: 1.4.4  
+**最后更新**: 2026年3月16日  
 **适用对象**: GitHub Copilot, Cursor, Claude, ChatGPT 等 AI Agent

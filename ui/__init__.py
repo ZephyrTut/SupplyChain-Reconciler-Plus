@@ -1,6 +1,6 @@
 """
 UI模块 - PyQt6 版本
-供应链智能对账系统 v1.4.3
+供应链智能对账系统 v1.4.4
 """
 
 from .qt_main_window import QtMainWindow

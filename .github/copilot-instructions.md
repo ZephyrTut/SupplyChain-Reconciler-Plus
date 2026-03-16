@@ -4,7 +4,7 @@
 
 **项目名称**: SupplyChain-Reconciler-Plus  
 **项目类型**: Python桌面应用（供应链对账系统）  
-**当前版本**: v1.4.3  
+**当前版本**: v1.4.4  
 **Python版本**: 3.10+  
 **主要框架**: PyQt6, qt-material, pandas, openpyxl
 
@@ -405,8 +405,8 @@ show_error(
 
 ---
 
-**最后更新**: 2026年1月11日  
-**文档版本**: 1.4.3  
+**最后更新**: 2026年3月16日  
+**文档版本**: 1.4.4  
 **适用Agent**: GitHub Copilot, Cursor, Claude, ChatGPT 等 AI Agent  
 
 **📚 详细功能文档**: 请参考 [docs/](../docs/) 目录  

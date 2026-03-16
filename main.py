@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-SupplyChain-Reconciler-Plus v1.4.3
+SupplyChain-Reconciler-Plus v1.4.4
 供应链智能对账系统 - Python 桌面应用 (PyQt6 版本)
 
 核心功能:
@@ -26,6 +26,7 @@ SupplyChain-Reconciler-Plus v1.4.3
 
 import sys
 import os
+from config.settings import APP_VERSION
 
 
 def main():
@@ -42,7 +43,7 @@ def main():
         # 创建应用
         app = QApplication(sys.argv)
         app.setApplicationName("SupplyChain-Reconciler-Plus")
-        app.setApplicationVersion("1.4.3")
+        app.setApplicationVersion(APP_VERSION)
         
         # 设置默认字体
         font = QFont("Microsoft YaHei", 9)
@@ -95,7 +96,7 @@ def main():
         # 导入并创建主窗口
         from ui.qt_main_window import QtMainWindow
         
-        print("\n🚀 SupplyChain-Reconciler-Plus v1.4.3 启动中...")
+        print(f"\n🚀 SupplyChain-Reconciler-Plus v{APP_VERSION} 启动中...")
         print("   UI框架: PyQt6 + qt-material\n")
         
         window = QtMainWindow()
