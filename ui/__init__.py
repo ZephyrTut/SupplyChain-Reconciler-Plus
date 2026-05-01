@@ -1,13 +1,10 @@
-"""
-UI模块 - PyQt6 版本
-供应链智能对账系统 v1.4.4
-"""
+"""UI module - PyQt6 version."""
 
 from .qt_main_window import QtMainWindow
 from .qt_config_panel import QtConfigPanel, NoScrollComboBox
 from .qt_result_preview import QtResultPreview, QtResultTable, SampleDisplay
 from .qt_dialogs import (
-    LoadingDialog, 
+    LoadingDialog,
     ProgressDialog,
     SheetSelectDialog,
     InputDialog,
@@ -18,20 +15,20 @@ from .qt_dialogs import (
     show_info,
     show_warning,
     show_error,
-    show_confirm
+    show_confirm,
 )
 
 __all__ = [
-    # 主窗口
+    # main window
     "QtMainWindow",
-    # 配置面板
+    # config panel
     "QtConfigPanel",
     "NoScrollComboBox",
-    # 结果预览
+    # result preview
     "QtResultPreview",
     "QtResultTable",
     "SampleDisplay",
-    # 对话框组件
+    # dialogs
     "LoadingDialog",
     "ProgressDialog",
     "SheetSelectDialog",
@@ -40,7 +37,7 @@ __all__ = [
     "WorkerThread",
     "TemplateManagerDialog",
     "run_with_progress",
-    # 便捷对话框函数
+    # helpers
     "show_info",
     "show_warning",
     "show_error",

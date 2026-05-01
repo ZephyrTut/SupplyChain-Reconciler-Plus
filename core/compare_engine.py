@@ -5,6 +5,7 @@ import pandas as pd
 import re
 from typing import Dict, List, Tuple, Optional, Any
 from config import COMPARE_STATUS
+from config.settings import BLANK_TOKEN
 
 
 class CompareEngine:
@@ -57,12 +58,39 @@ class CompareEngine:
             regexes = rule.get("regexes", [])
             if not regexes and rule.get("regex"):
                 regexes = [rule.get("regex")]
-            
+
             replace_val = rule.get("replace", "")
-            
-            if not column or column not in df.columns or not regexes:
+
+            if not column or column not in df.columns:
                 continue
             
+            if mode == "去中文保留关键词":
+                keywords = rule.get("keywords", []) or []
+                keyword_list = [str(k).strip() for k in keywords if str(k).strip()]
+                pattern_cn = re.compile(r"[\u4e00-\u9fff]+")
+                pattern_full_cn = re.compile(r"^[\u4e00-\u9fff]+$")
+
+                def _clean_value(val: Any) -> Any:
+                    if pd.isna(val):
+                        return val
+                    text = str(val).strip()
+                    if not text:
+                        return text
+                    if pattern_full_cn.match(text):
+                        return text
+                    if keyword_list and any(k in text for k in keyword_list):
+                        return text
+                    return pattern_cn.sub("", text).strip()
+
+                try:
+                    df[column] = df[column].apply(_clean_value)
+                except Exception as e:
+                    print(f"清洗列 {column} 时出错 (mode={mode}): {e}")
+                continue
+
+            if not regexes:
+                continue
+
             # 按顺序应用每个正则表达式
             for regex in regexes:
                 if not regex:
@@ -192,6 +220,109 @@ class CompareEngine:
         return df
 
     @staticmethod
+    def auto_map_system_parts(
+        system_df: pd.DataFrame,
+        manual_df: pd.DataFrame,
+        config: Optional[Dict[str, Any]] = None,
+        output_column: Optional[str] = None
+    ) -> Tuple[pd.DataFrame, Dict[str, int]]:
+        """根据手工表后缀映射系统表零件号（仅对 system_df 副本生效）。"""
+        def _normalize_supplier(value: Any) -> str:
+            text = str(value if value is not None else "").strip()
+            if not text:
+                return ""
+            match = re.match(r"^[A-Za-z0-9]+-(.+)$", text)
+            if match:
+                return match.group(1).strip()
+            return text
+        stats = {
+            "candidates": 0,
+            "matched": 0,
+            "ambiguous": 0,
+            "unmatched": 0
+        }
+
+        if system_df is None or manual_df is None:
+            return system_df, stats
+
+        if not config or not config.get("enabled"):
+            return system_df, stats
+
+        system_map = config.get("system", {})
+        manual_map = config.get("manual", {})
+        sys_supplier = system_map.get("supplier_col", "")
+        sys_order = system_map.get("order_col", "")
+        sys_part = system_map.get("part_col", "")
+        man_supplier = manual_map.get("supplier_col", "")
+        man_order = manual_map.get("order_col", "")
+        man_part = manual_map.get("part_col", "")
+
+        if not all([sys_supplier, sys_order, sys_part, man_supplier, man_order, man_part]):
+            return system_df, stats
+
+        if any(c not in system_df.columns for c in [sys_supplier, sys_order, sys_part]):
+            return system_df, stats
+        if any(c not in manual_df.columns for c in [man_supplier, man_order, man_part]):
+            return system_df, stats
+
+        suffixes = config.get("suffixes", []) or ["-001"]
+        suffixes = [str(s).strip() for s in suffixes if str(s).strip()]
+        if not suffixes:
+            return system_df, stats
+
+        manual_suffix_map: Dict[Tuple[str, str, str], set] = {}
+
+        for supplier_val, order_val, part_val in manual_df[
+            [man_supplier, man_order, man_part]
+        ].itertuples(index=False, name=None):
+            supplier = _normalize_supplier(supplier_val)
+            order = str(order_val if order_val is not None else "").strip()
+            part = str(part_val if part_val is not None else "").strip()
+            if not supplier or not order or not part:
+                continue
+            for suffix in suffixes:
+                if part.endswith(suffix):
+                    base = part[:-len(suffix)]
+                    if not base:
+                        continue
+                    manual_suffix_map.setdefault((supplier, order, base), set()).add(suffix)
+
+        mapped_df = system_df.copy()
+        mapped_parts = []
+
+        for supplier_val, order_val, part_val in mapped_df[
+            [sys_supplier, sys_order, sys_part]
+        ].itertuples(index=False, name=None):
+            supplier = _normalize_supplier(supplier_val)
+            order = str(order_val if order_val is not None else "").strip()
+            part = str(part_val if part_val is not None else "").strip()
+
+            if part.endswith("-000"):
+                stats["candidates"] += 1
+                base = part[:-4]
+                key = (supplier, order, base)
+                suffix_set = manual_suffix_map.get(key, set())
+                if len(suffix_set) == 1:
+                    suffix = next(iter(suffix_set))
+                    mapped_parts.append(base + suffix)
+                    stats["matched"] += 1
+                elif len(suffix_set) > 1:
+                    mapped_parts.append(part)
+                    stats["ambiguous"] += 1
+                else:
+                    mapped_parts.append(part)
+                    stats["unmatched"] += 1
+            else:
+                mapped_parts.append(part)
+
+        if output_column:
+            mapped_df[output_column] = mapped_parts
+        else:
+            mapped_df[sys_part] = mapped_parts
+
+        return mapped_df, stats
+
+    @staticmethod
     def aggregate_data(
         df: pd.DataFrame,
         key_col: str,
@@ -281,6 +412,28 @@ class CompareEngine:
         return [str(val).strip()]
 
     @staticmethod
+    def _build_blank_mask(df: pd.DataFrame, col: str) -> pd.Series:
+        """构建空白匹配掩码（空字符串/空格/NaN）。"""
+        series = df[col]
+        return series.isna() | series.astype(str).str.strip().eq("")
+
+    @staticmethod
+    def _normalize_filter_items(items: Optional[List[Any]]) -> List[Dict[str, Any]]:
+        """统一筛选规则为 dict 列表，兼容 tuple/dict 结构。"""
+        normalized: List[Dict[str, Any]] = []
+        for item in items or []:
+            if isinstance(item, dict):
+                normalized.append(item)
+                continue
+            if isinstance(item, (list, tuple)) and len(item) >= 3:
+                normalized.append({
+                    "column": item[0],
+                    "operator": item[1],
+                    "value": item[2]
+                })
+        return normalized
+
+    @staticmethod
     def _build_filter_mask(df: pd.DataFrame, col: str, op: str, val: Any) -> pd.Series:
         """构建单条筛选规则掩码。"""
         if col not in df.columns:
@@ -288,29 +441,54 @@ class CompareEngine:
 
         col_data = df[col].astype(str)
         values = CompareEngine._split_filter_values(val)
+        blank_requested = BLANK_TOKEN in values
+        values_no_blank = [v for v in values if v != BLANK_TOKEN]
+        blank_mask = CompareEngine._build_blank_mask(df, col) if blank_requested else None
 
         if op == "EQUALS":
+            if blank_requested and not values_no_blank:
+                return blank_mask
+            if blank_requested:
+                return col_data.isin(values_no_blank) | blank_mask
             return col_data == str(val)
         if op == "NOT_EQUALS":
+            if blank_requested and not values_no_blank:
+                return ~blank_mask
+            if blank_requested:
+                return ~col_data.isin(values_no_blank) & ~blank_mask
             return col_data != str(val)
         if op == "CONTAINS":
-            if not values:
+            if not values_no_blank and not blank_requested:
                 return pd.Series([True] * len(df), index=df.index)
-            mask = col_data.str.contains(values[0], na=False, regex=False)
-            for v in values[1:]:
-                mask = mask | col_data.str.contains(v, na=False, regex=False)
+            mask = pd.Series([False] * len(df), index=df.index)
+            if values_no_blank:
+                mask = col_data.str.contains(values_no_blank[0], na=False, regex=False)
+                for v in values_no_blank[1:]:
+                    mask = mask | col_data.str.contains(v, na=False, regex=False)
+            if blank_requested:
+                mask = mask | blank_mask
             return mask
         if op == "NOT_CONTAINS":
-            if not values:
+            if not values_no_blank and not blank_requested:
                 return pd.Series([True] * len(df), index=df.index)
-            mask = ~col_data.str.contains(values[0], na=False, regex=False)
-            for v in values[1:]:
-                mask = mask & ~col_data.str.contains(v, na=False, regex=False)
+            mask = pd.Series([True] * len(df), index=df.index)
+            if values_no_blank:
+                mask = ~col_data.str.contains(values_no_blank[0], na=False, regex=False)
+                for v in values_no_blank[1:]:
+                    mask = mask & ~col_data.str.contains(v, na=False, regex=False)
+            if blank_requested:
+                mask = mask & ~blank_mask
             return mask
         if op == "IN_LIST":
-            return col_data.isin(values)
+            mask = col_data.isin(values_no_blank)
+            if blank_requested:
+                mask = mask | blank_mask
+            return mask
         if op == "NOT_IN_LIST":
-            return ~col_data.isin(values)
+            mask = ~col_data.isin(values_no_blank)
+            if blank_requested:
+                mask = mask & ~blank_mask
+            return mask
         if op == "GREATER":
             try:
                 return pd.to_numeric(df[col], errors='coerce') > float(val)
@@ -337,20 +515,98 @@ class CompareEngine:
         if df is None or df.empty:
             return df
 
-        filters = filters or []
-        filter_exceptions = filter_exceptions or []
+        filter_items = CompareEngine._normalize_filter_items(filters)
+        exception_items = CompareEngine._normalize_filter_items(filter_exceptions)
+
+        filter_masks = []
+        for item in filter_items:
+            col = item.get("column")
+            op = item.get("operator")
+            val = item.get("value")
+            if col and op:
+                filter_masks.append(
+                    (item, CompareEngine._build_filter_mask(df, col, op, val))
+                )
 
         main_mask = pd.Series([True] * len(df), index=df.index)
-        if filters:
-            for col, op, val in filters:
-                main_mask = main_mask & CompareEngine._build_filter_mask(df, col, op, val)
+        for _, mask in filter_masks:
+            main_mask = main_mask & mask
 
-        exception_mask = pd.Series([False] * len(df), index=df.index)
-        if filter_exceptions:
-            for col, op, val in filter_exceptions:
-                exception_mask = exception_mask | CompareEngine._build_filter_mask(df, col, op, val)
+        global_exception_mask = pd.Series([False] * len(df), index=df.index)
+        scoped_exception_mask = pd.Series([False] * len(df), index=df.index)
 
-        return df[main_mask | exception_mask]
+        def normalize_target(target: Any) -> Optional[Dict[str, str]]:
+            if not target:
+                return None
+            if isinstance(target, dict):
+                return {
+                    "column": target.get("column", ""),
+                    "operator": target.get("operator", ""),
+                    "value": str(target.get("value", "")).strip()
+                }
+            return None
+
+        exception_groups: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
+
+        for item in exception_items:
+            target = normalize_target(item.get("target_filter"))
+            if not target or not target.get("column") or not target.get("operator"):
+                col = item.get("column")
+                op = item.get("operator")
+                val = item.get("value")
+                if col and op:
+                    global_exception_mask = global_exception_mask | CompareEngine._build_filter_mask(
+                        df, col, op, val
+                    )
+                continue
+
+            target_key = (
+                str(target.get("column")),
+                str(target.get("operator")),
+                str(target.get("value", "")).strip()
+            )
+            exception_groups.setdefault(target_key, []).append(item)
+
+        for (target_col, target_op, target_val), group_items in exception_groups.items():
+
+            matching_indices = [
+                idx for idx, (spec, _) in enumerate(filter_masks)
+                if str(spec.get("column")) == target_col
+                and str(spec.get("operator")) == target_op
+                and str(spec.get("value", "")).strip() == target_val
+            ]
+
+            if not matching_indices:
+                for item in group_items:
+                    col = item.get("column")
+                    op = item.get("operator")
+                    val = item.get("value")
+                    if col and op:
+                        global_exception_mask = global_exception_mask | CompareEngine._build_filter_mask(
+                            df, col, op, val
+                        )
+                continue
+
+            other_mask = pd.Series([True] * len(df), index=df.index)
+            for idx, (_, mask) in enumerate(filter_masks):
+                if idx in matching_indices:
+                    continue
+                other_mask = other_mask & mask
+
+            group_exception_mask = pd.Series([False] * len(df), index=df.index)
+            for item in group_items:
+                col = item.get("column")
+                op = item.get("operator")
+                val = item.get("value")
+                if col and op:
+                    group_exception_mask = group_exception_mask | CompareEngine._build_filter_mask(
+                        df, col, op, val
+                    )
+
+            scoped_exception_mask = scoped_exception_mask | (other_mask & group_exception_mask)
+
+        return df[main_mask | global_exception_mask | scoped_exception_mask]
+
 
     @staticmethod
     def merge_and_compare(
@@ -471,20 +727,19 @@ class CompareEngine:
         manual_nan = pd.isna(row.get("手工数量"))
         system_nan = pd.isna(row.get("系统总计"))
         
+        if abs(diff) < 0.001:
+            return COMPARE_STATUS["match"]
+
         # 系统有但手工无
         if system > 0 and (manual_nan or manual == 0):
             return COMPARE_STATUS["system_only"]
-        
+
         # 手工有但系统无
         if manual > 0 and (system_nan or system == 0):
             return COMPARE_STATUS["manual_only"]
-        
+
         # 都为0或都不存在
         if manual == 0 and system == 0:
-            return COMPARE_STATUS["match"]
-        
-        # 数值比较
-        if abs(diff) < 0.001:
             return COMPARE_STATUS["match"]
         
         return COMPARE_STATUS["diff"]

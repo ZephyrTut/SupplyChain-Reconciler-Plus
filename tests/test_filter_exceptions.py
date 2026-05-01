@@ -45,6 +45,34 @@ class TestFilterExceptions(unittest.TestCase):
 
         self.assertEqual(set(out["库存地点名称"]), {"湖州仓", "武义仓", "上海仓", "杭州仓"})
 
+    def test_scoped_exception_only_bypasses_one_filter(self):
+        """例外仅覆盖指定筛选，其他筛选仍生效"""
+        df = pd.DataFrame(
+            {
+                "库存地点名称": ["上海仓", "湖州仓", "上海仓", "湖州仓"],
+                "供应商名称": ["为鼎", "为鼎", "甲公司", "甲公司"]
+            }
+        )
+        filters = [
+            ("供应商名称", "NOT_IN_LIST", "为鼎"),
+            ("库存地点名称", "NOT_CONTAINS", "湖州")
+        ]
+        exceptions = [
+            {
+                "column": "供应商名称",
+                "operator": "EQUALS",
+                "value": "为鼎",
+                "target_filter": {
+                    "column": "供应商名称",
+                    "operator": "NOT_IN_LIST",
+                    "value": "为鼎"
+                }
+            }
+        ]
+
+        out = CompareEngine.apply_filters(df, filters, exceptions)
+        self.assertEqual(set(out["库存地点名称"]), {"上海仓"})
+
 
 if __name__ == "__main__":
     unittest.main()

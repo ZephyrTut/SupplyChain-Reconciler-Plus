@@ -4,7 +4,7 @@
 
 # ============== 应用配置 ==============
 APP_NAME = "供应链智能对账系统"
-APP_VERSION = "1.4.4"
+APP_VERSION = "1.5.0"
 WINDOW_SIZE = "1400x900"
 
 # ============== Excel 样式配置 ==============
@@ -113,6 +113,9 @@ FILTER_OPERATORS = {
     "NOT_EQUALS": "!=",
     "CONTAINS": "包含",
 }
+
+# ============== 筛选空白标记 ==============
+BLANK_TOKEN = "(空白)"
 
 # ============== 存储路径 ==============
 CONFIG_FILE = "reconciler_config.json"

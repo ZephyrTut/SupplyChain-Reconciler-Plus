@@ -276,9 +276,18 @@ class FilterRow(DynamicRow):
         "小于": "LESS"
     }
     
-    def __init__(self, columns: List[str], unique_values: Dict[str, List] = None, parent=None):
+    def __init__(
+        self,
+        columns: List[str],
+        unique_values: Dict[str, List] = None,
+        parent=None,
+        show_target_selector: bool = False,
+        target_options: Optional[List[Dict[str, Any]]] = None
+    ):
         self.columns = columns
         self.unique_values = unique_values or {}
+        self.show_target_selector = show_target_selector
+        self.target_options = target_options or []
         self._current_value_widget = None
         self._checkboxes = []  # 存储多选复选框
         self._selected_multiselect_values: List[str] = []
@@ -289,6 +298,15 @@ class FilterRow(DynamicRow):
         layout.setContentsMargins(0, 5, 0, 5)
         layout.setSpacing(8)
         
+        # 例外保留目标筛选选择（仅例外保留使用）
+        if self.show_target_selector:
+            self.target_combo = NoScrollComboBox()
+            self.target_combo.setMinimumWidth(120)
+            self.target_combo.setMaximumWidth(180)
+            self._update_target_options(self.target_options)
+            self.target_combo.currentIndexChanged.connect(lambda: self.changed.emit())
+            layout.addWidget(self.target_combo)
+
         # 列选择
         self.column_combo = NoScrollComboBox()
         self.column_combo.setMinimumWidth(100)
@@ -464,6 +482,28 @@ class FilterRow(DynamicRow):
         if selected_count > 2:
             preview += f" 等{selected_count}项"
         self.multiselect_summary_label.setText(preview)
+
+    def _update_target_options(self, options: List[Dict[str, Any]]):
+        """更新例外保留的目标筛选选项。"""
+        if not self.show_target_selector or not hasattr(self, "target_combo"):
+            return
+
+        current_data = self.target_combo.currentData()
+        self.target_combo.blockSignals(True)
+        self.target_combo.clear()
+        self.target_combo.addItem("(全部)", None)
+        for opt in options:
+            label = opt.get("label", "")
+            data = opt.get("data", {})
+            self.target_combo.addItem(label, data)
+
+        # 尝试恢复之前选择
+        if current_data:
+            for i in range(self.target_combo.count()):
+                if self.target_combo.itemData(i) == current_data:
+                    self.target_combo.setCurrentIndex(i)
+                    break
+        self.target_combo.blockSignals(False)
     
     def _on_checkbox_changed(self):
         """复选框状态变化"""
@@ -523,10 +563,22 @@ class FilterRow(DynamicRow):
         if value:
             # 映射操作符到引擎格式
             engine_op = self.OPERATOR_MAP.get(operator, operator)
-            return {"column": column, "operator": engine_op, "value": value}
+            payload = {"column": column, "operator": engine_op, "value": value}
+            if self.show_target_selector and hasattr(self, "target_combo"):
+                target_data = self.target_combo.currentData()
+                if target_data:
+                    payload["target_filter"] = target_data
+            return payload
         return {}
         
     def set_value(self, value: Dict):
+        if self.show_target_selector and "target_filter" in value and hasattr(self, "target_combo"):
+            target = value.get("target_filter") or {}
+            for i in range(self.target_combo.count()):
+                data = self.target_combo.itemData(i)
+                if data == target:
+                    self.target_combo.setCurrentIndex(i)
+                    break
         if "column" in value:
             idx = self.column_combo.findText(value["column"])
             if idx >= 0:
@@ -556,45 +608,37 @@ class FilterRow(DynamicRow):
         elif operator in self.MULTISELECT_OPERATORS:
             self._create_multiselect_widget()
 
+    def update_target_options(self, options: List[Dict[str, Any]]):
+        self._update_target_options(options)
+
 
 class ColumnCleanRow(DynamicRow):
     """列数据清洗行 - 三行布局"""
     
-    # 预设清洗规则
-    CLEAN_PRESETS = [
-        ("去中文", r"[\u4e00-\u9fa5]+"),
-        ("去末尾英文", r"[a-zA-Z]+$"),
-        ("去开头英文", r"^[a-zA-Z]+"),
-        ("只留数字", r"[^\d]+"),
-        ("去特殊符号", r"[^\w\s\u4e00-\u9fa5]+"),
-        ("去空格", r"^\s+|\s+$"),
-    ]
-    
     def __init__(self, columns: List[str], parent=None):
         self.columns = columns
-        self._checkboxes: Dict[str, QCheckBox] = {}
         super().__init__(parent)
         
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 2, 0, 2)
-        main_layout.setSpacing(2)
-        
+        main_layout.setSpacing(4)
+
         # 第一行：列选择 + 删除
         row1 = QHBoxLayout()
         row1.setSpacing(4)
-        
+
         col_label = QLabel("列:")
         col_label.setStyleSheet("color: #666; font-size: 10px;")
         row1.addWidget(col_label)
-        
+
         self.column_combo = NoScrollComboBox()
         self.column_combo.addItem("(选择列)")
         self.column_combo.addItems(self.columns)
         self.column_combo.currentIndexChanged.connect(lambda: self.changed.emit())
-        self.column_combo.setMinimumWidth(80)
+        self.column_combo.setMinimumWidth(100)
         row1.addWidget(self.column_combo, 1)
-        
+
         del_btn = QPushButton("✕")
         del_btn.setFixedSize(18, 18)
         del_btn.setStyleSheet("""
@@ -604,69 +648,50 @@ class ColumnCleanRow(DynamicRow):
         del_btn.clicked.connect(lambda: self.deleted.emit(self))
         row1.addWidget(del_btn)
         main_layout.addLayout(row1)
-        
-        # 第二行：预设规则（前3个）
+
+        # 第二行：去中文 + 关键词
         row2 = QHBoxLayout()
-        row2.setSpacing(4)
-        for i, (preset_name, _) in enumerate(self.CLEAN_PRESETS[:3]):
-            cb = QCheckBox(preset_name)
-            cb.setStyleSheet("QCheckBox { color: #333; font-size: 10px; }")
-            cb.stateChanged.connect(lambda: self.changed.emit())
-            self._checkboxes[preset_name] = cb
-            row2.addWidget(cb)
-        row2.addStretch()
+        row2.setSpacing(6)
+
+        self.keep_cn_checkbox = QCheckBox("去中文")
+        self.keep_cn_checkbox.setStyleSheet("QCheckBox { color: #333; font-size: 10px; }")
+        self.keep_cn_checkbox.stateChanged.connect(lambda: self.changed.emit())
+        row2.addWidget(self.keep_cn_checkbox)
+
+        keyword_label = QLabel("保留关键词:")
+        keyword_label.setStyleSheet("color: #666; font-size: 10px;")
+        row2.addWidget(keyword_label)
+
+        self.keyword_edit = QLineEdit()
+        self.keyword_edit.setPlaceholderText("如: 换单,返修")
+        self.keyword_edit.setMinimumWidth(120)
+        self.keyword_edit.setStyleSheet("font-size: 10px; padding: 1px 3px;")
+        self.keyword_edit.textChanged.connect(lambda: self.changed.emit())
+        row2.addWidget(self.keyword_edit, 1)
+
         main_layout.addLayout(row2)
-        
-        # 第三行：预设规则（后3个）+ 自定义
-        row3 = QHBoxLayout()
-        row3.setSpacing(4)
-        for i, (preset_name, _) in enumerate(self.CLEAN_PRESETS[3:]):
-            cb = QCheckBox(preset_name)
-            cb.setStyleSheet("QCheckBox { color: #333; font-size: 10px; }")
-            cb.stateChanged.connect(lambda: self.changed.emit())
-            self._checkboxes[preset_name] = cb
-            row3.addWidget(cb)
-        
-        self.custom_edit = QLineEdit()
-        self.custom_edit.setPlaceholderText("自定义")
-        self.custom_edit.setMaximumWidth(60)
-        self.custom_edit.setStyleSheet("font-size: 10px; padding: 1px 3px;")
-        self.custom_edit.textChanged.connect(lambda: self.changed.emit())
-        row3.addWidget(self.custom_edit)
-        row3.addStretch()
-        main_layout.addLayout(row3)
+
+        hint = QLabel("全中文会自动保留，命中关键词也会保留")
+        hint.setStyleSheet("color: #999; font-size: 10px;")
+        main_layout.addWidget(hint)
         
     def get_value(self) -> Dict:
         column = self.column_combo.currentText()
         if column == "(选择列)":
             return {}
-        
-        # 收集选中的规则
-        selected_presets = []
-        regexes = []
-        
-        for preset_name, preset_regex in self.CLEAN_PRESETS:
-            if self._checkboxes[preset_name].isChecked():
-                selected_presets.append(preset_name)
-                regexes.append(preset_regex)
-        
-        # 自定义符号
-        custom_text = self.custom_edit.text().strip()
-        if custom_text:
-            selected_presets.append(f"去除'{custom_text}'")
-            # 转义特殊正则字符
-            import re
-            escaped = re.escape(custom_text)
-            regexes.append(escaped)
-        
-        if not regexes:
+
+        if not self.keep_cn_checkbox.isChecked():
             return {}
-        
+
+        keywords = [
+            k.strip() for k in self.keyword_edit.text().replace("，", ",").split(",")
+            if k.strip()
+        ]
+
         return {
             "column": column,
-            "mode": "删除匹配",
-            "preset": " + ".join(selected_presets),
-            "regexes": regexes,
+            "mode": "去中文保留关键词",
+            "keywords": keywords
         }
         
     def set_value(self, value: Dict):
@@ -674,17 +699,18 @@ class ColumnCleanRow(DynamicRow):
             idx = self.column_combo.findText(value["column"])
             if idx >= 0:
                 self.column_combo.setCurrentIndex(idx)
-        
-        # 恢复选中的预设
-        preset_str = value.get("preset", "")
-        for preset_name, _ in self.CLEAN_PRESETS:
-            self._checkboxes[preset_name].setChecked(preset_name in preset_str)
-        
-        # 恢复自定义符号（从preset中提取）
-        import re
-        match = re.search(r"去除'([^']+)'", preset_str)
-        if match:
-            self.custom_edit.setText(match.group(1))
+
+        mode = value.get("mode", "")
+        if mode == "去中文保留关键词":
+            self.keep_cn_checkbox.setChecked(True)
+            keywords = value.get("keywords", []) or []
+            self.keyword_edit.setText(",".join([str(k) for k in keywords if str(k).strip()]))
+            return
+
+        # 兼容旧规则：如果包含去中文正则，自动勾选去中文
+        regexes = value.get("regexes", []) or []
+        if any(r"[\u4e00-\u9fa5]" in str(r) or r"[\u4e00-\u9fff]" in str(r) for r in regexes):
+            self.keep_cn_checkbox.setChecked(True)
 
 
 class CollapsibleSection(QWidget):
@@ -782,11 +808,21 @@ class QtConfigPanel(QScrollArea):
         
         self.key_rows: List[KeyMappingRow] = []
         self.manual_filter_rows: List[FilterRow] = []
-        self.system_filter_rows: List[FilterRow] = []
         self.manual_exception_rows: List[FilterRow] = []
+        self.system_filter_rows: List[FilterRow] = []
         self.system_exception_rows: List[FilterRow] = []
         self.clean_rows: List[ColumnCleanRow] = []  # 列清洗行
         self._updating_formula_options = False
+
+        self.auto_map_enabled_checkbox: Optional[QCheckBox] = None
+        self.auto_map_stats_label: Optional[QLabel] = None
+        self.auto_map_system_supplier_combo: Optional[NoScrollComboBox] = None
+        self.auto_map_system_order_combo: Optional[NoScrollComboBox] = None
+        self.auto_map_system_part_combo: Optional[NoScrollComboBox] = None
+        self.auto_map_manual_supplier_combo: Optional[NoScrollComboBox] = None
+        self.auto_map_manual_order_combo: Optional[NoScrollComboBox] = None
+        self.auto_map_manual_part_combo: Optional[NoScrollComboBox] = None
+        self.auto_map_suffix_edit: Optional[QLineEdit] = None
         
         self._setup_ui()
         
@@ -1088,12 +1124,12 @@ class QtConfigPanel(QScrollArea):
         system_label = QLabel("📋 系统表筛选:")
         system_label.setStyleSheet("font-weight: bold; color: #2e7d32;")
         self.filter_section.add_widget(system_label)
-        
+
         self.system_filter_container = QWidget()
         self.system_filter_layout = QVBoxLayout(self.system_filter_container)
         self.system_filter_layout.setContentsMargins(0, 0, 0, 0)
         self.filter_section.add_widget(self.system_filter_container)
-        
+
         add_system_filter_btn = QPushButton("➕ 添加筛选条件")
         add_system_filter_btn.setStyleSheet("""
             QPushButton {
@@ -1132,6 +1168,87 @@ class QtConfigPanel(QScrollArea):
         """)
         add_system_exception_btn.clicked.connect(lambda: self._add_exception_row("system"))
         self.filter_section.add_widget(add_system_exception_btn)
+
+        # 系统表零件号自动映射
+        auto_map_box = QGroupBox("🧭 系统表零件号自动映射")
+        auto_map_box.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                margin-top: 6px;
+                padding: 8px;
+                background-color: #ffffff;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                top: -4px;
+                color: #333333;
+                font-weight: bold;
+            }
+        """)
+        auto_map_layout = QVBoxLayout(auto_map_box)
+        auto_map_layout.setContentsMargins(8, 10, 8, 6)
+        auto_map_layout.setSpacing(6)
+
+        self.auto_map_enabled_checkbox = QCheckBox("启用自动映射（仅影响对账与预处理，不修改原始系统表）")
+        self.auto_map_enabled_checkbox.setStyleSheet("color: #333;")
+        self.auto_map_enabled_checkbox.stateChanged.connect(self._emit_config_changed)
+        auto_map_layout.addWidget(self.auto_map_enabled_checkbox)
+
+        system_row = QHBoxLayout()
+        system_row.setSpacing(6)
+        system_row.addWidget(QLabel("系统表列:"))
+        self.auto_map_system_supplier_combo = NoScrollComboBox()
+        self.auto_map_system_supplier_combo.addItem("(供应商列)")
+        self.auto_map_system_supplier_combo.currentIndexChanged.connect(self._emit_config_changed)
+        system_row.addWidget(self.auto_map_system_supplier_combo, 1)
+        self.auto_map_system_order_combo = NoScrollComboBox()
+        self.auto_map_system_order_combo.addItem("(单号列)")
+        self.auto_map_system_order_combo.currentIndexChanged.connect(self._emit_config_changed)
+        system_row.addWidget(self.auto_map_system_order_combo, 1)
+        self.auto_map_system_part_combo = NoScrollComboBox()
+        self.auto_map_system_part_combo.addItem("(零件号列)")
+        self.auto_map_system_part_combo.currentIndexChanged.connect(self._emit_config_changed)
+        system_row.addWidget(self.auto_map_system_part_combo, 1)
+        auto_map_layout.addLayout(system_row)
+
+        manual_row = QHBoxLayout()
+        manual_row.setSpacing(6)
+        manual_row.addWidget(QLabel("手工表列:"))
+        self.auto_map_manual_supplier_combo = NoScrollComboBox()
+        self.auto_map_manual_supplier_combo.addItem("(供应商列)")
+        self.auto_map_manual_supplier_combo.currentIndexChanged.connect(self._emit_config_changed)
+        manual_row.addWidget(self.auto_map_manual_supplier_combo, 1)
+        self.auto_map_manual_order_combo = NoScrollComboBox()
+        self.auto_map_manual_order_combo.addItem("(单号列)")
+        self.auto_map_manual_order_combo.currentIndexChanged.connect(self._emit_config_changed)
+        manual_row.addWidget(self.auto_map_manual_order_combo, 1)
+        self.auto_map_manual_part_combo = NoScrollComboBox()
+        self.auto_map_manual_part_combo.addItem("(零件号列)")
+        self.auto_map_manual_part_combo.currentIndexChanged.connect(self._emit_config_changed)
+        manual_row.addWidget(self.auto_map_manual_part_combo, 1)
+        auto_map_layout.addLayout(manual_row)
+
+        suffix_row = QHBoxLayout()
+        suffix_row.setSpacing(6)
+        suffix_row.addWidget(QLabel("后缀规则:"))
+        self.auto_map_suffix_edit = QLineEdit()
+        self.auto_map_suffix_edit.setPlaceholderText("例如: -001")
+        self.auto_map_suffix_edit.setText("-001")
+        self.auto_map_suffix_edit.textChanged.connect(self._emit_config_changed)
+        suffix_row.addWidget(self.auto_map_suffix_edit, 1)
+        suffix_hint = QLabel("仅映射系统表 -000 到手工表对应后缀")
+        suffix_hint.setStyleSheet("color: #666; font-size: 11px;")
+        suffix_row.addWidget(suffix_hint)
+        auto_map_layout.addLayout(suffix_row)
+
+        self.auto_map_stats_label = QLabel("映射统计: 未启用")
+        self.auto_map_stats_label.setStyleSheet("color: #666; font-size: 11px;")
+        self.auto_map_stats_label.setWordWrap(True)
+        auto_map_layout.addWidget(self.auto_map_stats_label)
+
+        self.filter_section.add_widget(auto_map_box)
         
         # 分隔线
         separator3 = QWidget()
@@ -1208,6 +1325,7 @@ class QtConfigPanel(QScrollArea):
             row.deleted.connect(lambda r: self._remove_filter_row(r, "system"))
             self.system_filter_rows.append(row)
             self.system_filter_layout.addWidget(row)
+            row.changed.connect(self._refresh_system_exception_targets)
         row.changed.connect(self._emit_config_changed)
         
     def _remove_filter_row(self, row: FilterRow, table_type: str):
@@ -1228,7 +1346,12 @@ class QtConfigPanel(QScrollArea):
             self.manual_exception_rows.append(row)
             self.manual_exception_layout.addWidget(row)
         else:
-            row = FilterRow(self.system_columns, self.system_unique_values)
+            row = FilterRow(
+                self.system_columns,
+                self.system_unique_values,
+                show_target_selector=True,
+                target_options=self._build_system_exception_target_options()
+            )
             row.deleted.connect(lambda r: self._remove_exception_row(r, "system"))
             self.system_exception_rows.append(row)
             self.system_exception_layout.addWidget(row)
@@ -1244,6 +1367,42 @@ class QtConfigPanel(QScrollArea):
                 self.system_exception_rows.remove(row)
         row.deleteLater()
         self._emit_config_changed()
+
+    def _build_system_exception_target_options(self) -> List[Dict[str, Any]]:
+        """构建系统表例外保留可选目标筛选。"""
+        options: List[Dict[str, Any]] = []
+        for row in self.system_filter_rows:
+            filter_data = row.get_value()
+            if not filter_data:
+                continue
+
+            column = filter_data.get("column", "")
+            operator = filter_data.get("operator", "")
+            value = filter_data.get("value", "")
+            if not column or not operator or not value:
+                continue
+
+            op_label = row.operator_combo.currentText()
+            value_preview = str(value)
+            if len(value_preview) > 18:
+                value_preview = value_preview[:18] + "..."
+
+            label = f"{column} · {op_label} · {value_preview}"
+            options.append({
+                "label": label,
+                "data": {
+                    "column": column,
+                    "operator": operator,
+                    "value": value
+                }
+            })
+        return options
+
+    def _refresh_system_exception_targets(self):
+        """同步系统表例外保留的目标筛选选项。"""
+        options = self._build_system_exception_target_options()
+        for row in self.system_exception_rows:
+            row.update_target_options(options)
     
     def _update_manual_pivot_config(self):
         """更新手工表透视配置（独立区域）"""
@@ -1499,6 +1658,10 @@ class QtConfigPanel(QScrollArea):
     def _emit_config_changed(self):
         """发射配置变更信号"""
         self.config_changed.emit()
+
+    def set_auto_map_stats(self, text: str):
+        if self.auto_map_stats_label:
+            self.auto_map_stats_label.setText(text)
         
     def set_columns(self, manual_columns: List[str], system_columns: List[str]):
         """设置列选项"""
@@ -1531,6 +1694,38 @@ class QtConfigPanel(QScrollArea):
             row.column_combo.addItems(manual_columns)
             if current_col in manual_columns:
                 row.column_combo.setCurrentText(current_col)
+
+        # 更新系统表筛选列选项
+        for row in self.system_filter_rows:
+            row.update_unique_values(self.system_unique_values)
+        for row in self.system_exception_rows:
+            row.update_unique_values(self.system_unique_values)
+
+        if self.auto_map_system_supplier_combo:
+            self.auto_map_system_supplier_combo.clear()
+            self.auto_map_system_supplier_combo.addItem("(供应商列)")
+            self.auto_map_system_supplier_combo.addItems(system_columns)
+        if self.auto_map_system_order_combo:
+            self.auto_map_system_order_combo.clear()
+            self.auto_map_system_order_combo.addItem("(单号列)")
+            self.auto_map_system_order_combo.addItems(system_columns)
+        if self.auto_map_system_part_combo:
+            self.auto_map_system_part_combo.clear()
+            self.auto_map_system_part_combo.addItem("(零件号列)")
+            self.auto_map_system_part_combo.addItems(system_columns)
+
+        if self.auto_map_manual_supplier_combo:
+            self.auto_map_manual_supplier_combo.clear()
+            self.auto_map_manual_supplier_combo.addItem("(供应商列)")
+            self.auto_map_manual_supplier_combo.addItems(manual_columns)
+        if self.auto_map_manual_order_combo:
+            self.auto_map_manual_order_combo.clear()
+            self.auto_map_manual_order_combo.addItem("(单号列)")
+            self.auto_map_manual_order_combo.addItems(manual_columns)
+        if self.auto_map_manual_part_combo:
+            self.auto_map_manual_part_combo.clear()
+            self.auto_map_manual_part_combo.addItem("(零件号列)")
+            self.auto_map_manual_part_combo.addItems(manual_columns)
         
     def set_system_unique_values(self, unique_values: Dict[str, List]):
         """设置系统表唯一值（用于筛选和透视）"""
@@ -1550,8 +1745,8 @@ class QtConfigPanel(QScrollArea):
             
     def get_config(self) -> Dict[str, Any]:
         """获取当前配置"""
-        config = {}
-        
+        config: Dict[str, Any] = {}
+
         # 主键映射
         key_mappings = []
         for row in self.key_rows:
@@ -1559,7 +1754,7 @@ class QtConfigPanel(QScrollArea):
             if mapping:
                 key_mappings.append(mapping)
         config["key_mappings"] = key_mappings
-        
+
         # 数值列
         manual_value = self.manual_value_combo.currentText()
         system_value = self.system_value_combo.currentText()
@@ -1567,20 +1762,18 @@ class QtConfigPanel(QScrollArea):
             "manual": manual_value if manual_value != "(选择列)" else "",
             "system": system_value if system_value != "(选择列)" else ""
         }
-        
+
         # 手工表筛选
         manual_filters = []
         for row in self.manual_filter_rows:
             f = row.get_value()
             if f:
-                # 转换操作符为内部代码
                 from core.compare_engine import CompareEngine
-                f_converted = {
+                manual_filters.append({
                     "column": f["column"],
                     "operator": CompareEngine.convert_operator(f["operator"]),
                     "value": f["value"]
-                }
-                manual_filters.append(f_converted)
+                })
         config["manual_filters"] = manual_filters
 
         # 手工表例外保留
@@ -1589,27 +1782,24 @@ class QtConfigPanel(QScrollArea):
             f = row.get_value()
             if f:
                 from core.compare_engine import CompareEngine
-                f_converted = {
+                manual_filter_exceptions.append({
                     "column": f["column"],
                     "operator": CompareEngine.convert_operator(f["operator"]),
                     "value": f["value"]
-                }
-                manual_filter_exceptions.append(f_converted)
+                })
         config["manual_filter_exceptions"] = manual_filter_exceptions
-        
+
         # 系统表筛选
         system_filters = []
         for row in self.system_filter_rows:
             f = row.get_value()
             if f:
-                # 转换操作符为内部代码
                 from core.compare_engine import CompareEngine
-                f_converted = {
+                system_filters.append({
                     "column": f["column"],
                     "operator": CompareEngine.convert_operator(f["operator"]),
                     "value": f["value"]
-                }
-                system_filters.append(f_converted)
+                })
         config["system_filters"] = system_filters
 
         # 系统表例外保留
@@ -1618,14 +1808,41 @@ class QtConfigPanel(QScrollArea):
             f = row.get_value()
             if f:
                 from core.compare_engine import CompareEngine
-                f_converted = {
+                item = {
                     "column": f["column"],
                     "operator": CompareEngine.convert_operator(f["operator"]),
                     "value": f["value"]
                 }
-                system_filter_exceptions.append(f_converted)
+                if f.get("target_filter"):
+                    item["target_filter"] = f.get("target_filter")
+                system_filter_exceptions.append(item)
         config["system_filter_exceptions"] = system_filter_exceptions
-        
+
+        # 系统表零件号自动映射
+        auto_map_config = {
+            "enabled": bool(self.auto_map_enabled_checkbox and self.auto_map_enabled_checkbox.isChecked()),
+            "system": {
+                "supplier_col": self.auto_map_system_supplier_combo.currentText() if self.auto_map_system_supplier_combo else "",
+                "order_col": self.auto_map_system_order_combo.currentText() if self.auto_map_system_order_combo else "",
+                "part_col": self.auto_map_system_part_combo.currentText() if self.auto_map_system_part_combo else ""
+            },
+            "manual": {
+                "supplier_col": self.auto_map_manual_supplier_combo.currentText() if self.auto_map_manual_supplier_combo else "",
+                "order_col": self.auto_map_manual_order_combo.currentText() if self.auto_map_manual_order_combo else "",
+                "part_col": self.auto_map_manual_part_combo.currentText() if self.auto_map_manual_part_combo else ""
+            },
+            "suffixes": []
+        }
+
+        if self.auto_map_suffix_edit:
+            suffixes = [
+                s.strip() for s in self.auto_map_suffix_edit.text().replace("，", ",").split(",")
+                if s.strip()
+            ]
+            auto_map_config["suffixes"] = suffixes
+
+        config["system_auto_map"] = auto_map_config
+
         # 列清洗规则
         clean_rules = []
         for row in self.clean_rows:
@@ -1633,13 +1850,12 @@ class QtConfigPanel(QScrollArea):
             if rule:
                 clean_rules.append(rule)
         config["clean_rules"] = clean_rules
-        
+
         # 手工表透视 - 从独立透视配置区域获取
         if hasattr(self, '_pivot_out_checkboxes'):
             out_values = [cb.text() for cb in self._pivot_out_checkboxes if cb.isChecked()]
             in_values = [cb.text() for cb in self._pivot_in_checkboxes if cb.isChecked()]
             if out_values or in_values:
-                # 获取筛选列
                 pivot_column = ""
                 for row in self.manual_filter_rows:
                     operator = row.operator_combo.currentText()
@@ -1651,35 +1867,33 @@ class QtConfigPanel(QScrollArea):
                     "out_values": out_values,
                     "in_values": in_values
                 }
-        
+
         # 系统表透视列
         pivot_col = self.pivot_column_combo.currentText()
         if pivot_col != "(不透视)":
             config["pivot_column"] = {"system": pivot_col}
             if pivot_col in self.system_unique_values:
                 config["pivot_values"] = self.system_unique_values[pivot_col]
-        
-        # 差值公式（使用动态字母，默认C - B：手工数量-系统总计）
+
+        # 差值公式
         config["difference_formula"] = self.formula_edit.text().strip() or "C - B"
-        
+
         return config
-        
+
     def set_config(self, config: Dict[str, Any]):
         """加载配置"""
         # 主键映射
         key_mappings = config.get("key_mappings", [])
-        # 清空现有行
-        for row in self.key_rows[1:]:  # 保留第一行
+        for row in self.key_rows[1:]:
             row.deleteLater()
         self.key_rows = self.key_rows[:1]
-        
-        # 设置第一行并添加其他行
+
         if key_mappings:
             self.key_rows[0].set_value(key_mappings[0])
             for mapping in key_mappings[1:]:
                 self._add_key_row()
                 self.key_rows[-1].set_value(mapping)
-                
+
         # 数值列
         value_mapping = config.get("value_mapping", {})
         if value_mapping.get("manual"):
@@ -1690,66 +1904,57 @@ class QtConfigPanel(QScrollArea):
             idx = self.system_value_combo.findText(value_mapping["system"])
             if idx >= 0:
                 self.system_value_combo.setCurrentIndex(idx)
-                
+
         # 透视列
         pivot_config = config.get("pivot_column", {})
-        if isinstance(pivot_config, dict):
-            pivot_col = pivot_config.get("system", "")
-        else:
-            pivot_col = pivot_config
+        pivot_col = pivot_config.get("system", "") if isinstance(pivot_config, dict) else pivot_config
         if pivot_col:
             idx = self.pivot_column_combo.findText(pivot_col)
             if idx >= 0:
                 self.pivot_column_combo.setCurrentIndex(idx)
-                
+
         # 差值公式
         formula = config.get("difference_formula", "M - S")
         self.formula_edit.setText(formula)
 
-        # 模板加载后，快速选择下拉重置为“自定义”，避免首项重复点击不触发
         custom_idx = self.formula_quick_combo.findText("自定义...")
         if custom_idx >= 0:
-            # 先置为无选择，再置为自定义，确保后续选择首项能触发
             self.formula_quick_combo.setCurrentIndex(-1)
             self.formula_quick_combo.setCurrentIndex(custom_idx)
-        
-        # 手工表筛选 - 先清空现有行
+
+        # 手工表筛选
         for row in self.manual_filter_rows[:]:
             row.deleteLater()
         self.manual_filter_rows.clear()
-        
-        # 加载手工表筛选条件
+
         manual_filters = config.get("manual_filters", [])
         for f in manual_filters:
             self._add_filter_row("manual")
-            # 反向映射操作符
             op_reverse = {v: k for k, v in FilterRow.OPERATOR_MAP.items()}
-            f_display = {
+            self.manual_filter_rows[-1].set_value({
                 "column": f.get("column", ""),
                 "operator": op_reverse.get(f.get("operator", ""), f.get("operator", "")),
                 "value": f.get("value", "")
-            }
-            self.manual_filter_rows[-1].set_value(f_display)
-        
-        # 系统表筛选 - 先清空现有行
+            })
+
+        # 系统表筛选
         for row in self.system_filter_rows[:]:
             row.deleteLater()
         self.system_filter_rows.clear()
-        
-        # 加载系统表筛选条件
+
         system_filters = config.get("system_filters", [])
         for f in system_filters:
             self._add_filter_row("system")
-            # 反向映射操作符
             op_reverse = {v: k for k, v in FilterRow.OPERATOR_MAP.items()}
-            f_display = {
+            self.system_filter_rows[-1].set_value({
                 "column": f.get("column", ""),
                 "operator": op_reverse.get(f.get("operator", ""), f.get("operator", "")),
                 "value": f.get("value", "")
-            }
-            self.system_filter_rows[-1].set_value(f_display)
+            })
 
-        # 手工表例外保留 - 先清空现有行
+        self._refresh_system_exception_targets()
+
+        # 手工表例外保留
         for row in self.manual_exception_rows[:]:
             row.deleteLater()
         self.manual_exception_rows.clear()
@@ -1758,14 +1963,13 @@ class QtConfigPanel(QScrollArea):
         for f in manual_filter_exceptions:
             self._add_exception_row("manual")
             op_reverse = {v: k for k, v in FilterRow.OPERATOR_MAP.items()}
-            f_display = {
+            self.manual_exception_rows[-1].set_value({
                 "column": f.get("column", ""),
                 "operator": op_reverse.get(f.get("operator", ""), f.get("operator", "")),
                 "value": f.get("value", "")
-            }
-            self.manual_exception_rows[-1].set_value(f_display)
+            })
 
-        # 系统表例外保留 - 先清空现有行
+        # 系统表例外保留
         for row in self.system_exception_rows[:]:
             row.deleteLater()
         self.system_exception_rows.clear()
@@ -1779,20 +1983,61 @@ class QtConfigPanel(QScrollArea):
                 "operator": op_reverse.get(f.get("operator", ""), f.get("operator", "")),
                 "value": f.get("value", "")
             }
+            if f.get("target_filter"):
+                f_display["target_filter"] = f.get("target_filter")
             self.system_exception_rows[-1].set_value(f_display)
-        
-        # 列清洗规则 - 先清空现有行
+
+        # 系统表零件号自动映射
+        auto_map = config.get("system_auto_map", {})
+        if self.auto_map_enabled_checkbox:
+            self.auto_map_enabled_checkbox.setChecked(bool(auto_map.get("enabled")))
+
+        system_map = auto_map.get("system", {})
+        manual_map = auto_map.get("manual", {})
+
+        if self.auto_map_system_supplier_combo and system_map.get("supplier_col"):
+            idx = self.auto_map_system_supplier_combo.findText(system_map.get("supplier_col"))
+            if idx >= 0:
+                self.auto_map_system_supplier_combo.setCurrentIndex(idx)
+        if self.auto_map_system_order_combo and system_map.get("order_col"):
+            idx = self.auto_map_system_order_combo.findText(system_map.get("order_col"))
+            if idx >= 0:
+                self.auto_map_system_order_combo.setCurrentIndex(idx)
+        if self.auto_map_system_part_combo and system_map.get("part_col"):
+            idx = self.auto_map_system_part_combo.findText(system_map.get("part_col"))
+            if idx >= 0:
+                self.auto_map_system_part_combo.setCurrentIndex(idx)
+
+        if self.auto_map_manual_supplier_combo and manual_map.get("supplier_col"):
+            idx = self.auto_map_manual_supplier_combo.findText(manual_map.get("supplier_col"))
+            if idx >= 0:
+                self.auto_map_manual_supplier_combo.setCurrentIndex(idx)
+        if self.auto_map_manual_order_combo and manual_map.get("order_col"):
+            idx = self.auto_map_manual_order_combo.findText(manual_map.get("order_col"))
+            if idx >= 0:
+                self.auto_map_manual_order_combo.setCurrentIndex(idx)
+        if self.auto_map_manual_part_combo and manual_map.get("part_col"):
+            idx = self.auto_map_manual_part_combo.findText(manual_map.get("part_col"))
+            if idx >= 0:
+                self.auto_map_manual_part_combo.setCurrentIndex(idx)
+
+        if self.auto_map_suffix_edit:
+            suffixes = auto_map.get("suffixes", []) or []
+            if suffixes:
+                self.auto_map_suffix_edit.setText(",".join([str(s) for s in suffixes if str(s).strip()]))
+
+        # 列清洗规则
         for row in self.clean_rows[:]:
             row.deleteLater()
         self.clean_rows.clear()
-        
-        # 加载清洗规则
+
         clean_rules = config.get("clean_rules", [])
         for rule in clean_rules:
             self._add_clean_row()
             self.clean_rows[-1].set_value(rule)
-        
-        # 手工表透视配置 - 应用到独立透视区域
+
+        # 手工表透视配置
+        self._update_manual_pivot_config()
         manual_pivot = config.get("manual_pivot", {})
         if manual_pivot and hasattr(self, '_pivot_out_checkboxes'):
             out_values = manual_pivot.get("out_values", [])

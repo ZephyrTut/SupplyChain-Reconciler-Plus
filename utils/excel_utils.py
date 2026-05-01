@@ -5,6 +5,8 @@ import pandas as pd
 from typing import Dict, List, Optional
 import os
 
+from config.settings import BLANK_TOKEN
+
 
 def get_sheet_names(filepath: str) -> List[str]:
     """
@@ -195,16 +197,22 @@ def extract_unique_values(
 
     for col in df.columns:
         try:
-            series = df[col].dropna()
+            series = df[col]
             if series.empty:
                 continue
 
             values = []
             seen = set()
+            has_blank = False
 
             for item in series.tolist():
+                if pd.isna(item):
+                    has_blank = True
+                    continue
+
                 text = str(item).strip()
                 if not text or text.lower() == "nan":
+                    has_blank = True
                     continue
                 if text in seen:
                     continue
@@ -214,6 +222,9 @@ def extract_unique_values(
 
                 if len(values) >= max_values_per_column:
                     break
+
+            if has_blank:
+                values = [BLANK_TOKEN] + values
 
             if values:
                 unique_values[str(col)] = values

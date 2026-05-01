@@ -4,7 +4,7 @@
 
 **项目名称**: SupplyChain-Reconciler-Plus  
 **项目类型**: Python桌面应用（供应链对账系统）  
-**当前版本**: v1.4.4  
+**当前版本**: v1.5.0
 **Python版本**: 3.10+  
 **主要框架**: PyQt6, qt-material, pandas, openpyxl
 

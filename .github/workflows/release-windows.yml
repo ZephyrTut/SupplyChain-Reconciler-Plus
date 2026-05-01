@@ -1,195 +1,74 @@
-name: Build and Release (Windows)
+name: Build and Release Windows
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       version_tag:
-        description: '版本标签 (例如: v1.4.4)'
+        description: '版本标签 (例如: v1.5.0)'
         required: true
-        default: 'v1.0.0'
+        default: 'v1.5.0'
 
 permissions:
   contents: write
 
-env:
-  APP_NAME: SupplyChain-Reconciler-Plus
-  PLATFORM: windows-x64
-
 jobs:
   build-windows:
     runs-on: windows-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set tag variable
-        id: set_tag
+      - name: Determine version
+        id: version
         shell: pwsh
         run: |
-          # 安全地设置标签变量（PowerShell 版本）
-          if ("${{ github.event_name }}" -eq "push" -and "${{ github.ref }}" -like "refs/tags/*") {
-            $tag = "${{ github.ref }}".Replace("refs/tags/", "")
+          if ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -like 'refs/tags/*') {
+            $version = $env:GITHUB_REF.Replace('refs/tags/', '')
+          } elseif ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $version = '${{ inputs.version_tag }}'
+          } else {
+            $version = 'v1.5.0'
           }
-          elseif ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $tag = "${{ github.event.inputs.version_tag }}"
-          }
-          else {
-            $tag = "v1.0.0"
-          }
-
-          # 清除换行和非法字符
-          $cleanTag = ($tag -replace "[`r`n]", "") -replace "[^a-zA-Z0-9._-]", "-"
-
-          "TAG=$cleanTag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "tag=$cleanTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "Using tag: $cleanTag"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 20
-          max_attempts: 3
-          retry_on: error
-          shell: pwsh
-          command: |
-            python -m pip install --upgrade pip
-            pip install -r requirements.txt
-            pip install pyinstaller
-
-      - name: Install UPX
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 2
-          retry_on: error
-          shell: pwsh
-          command: |
-            choco install upx -y
-            $upxPath = (Get-Command upx -ErrorAction Stop).Source
-            Write-Host "UPX installed at: $upxPath"
-
-      - name: Build executable with PyInstaller
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 20
-          max_attempts: 2
-          retry_on: error
-          shell: pwsh
-          command: |
-            $upxDir = Split-Path -Parent (Get-Command upx -ErrorAction Stop).Source
-            pyinstaller --noconfirm --clean `
-              --upx-dir "$upxDir" `
-              "SupplyChain-Reconciler-Plus.spec"
-
-      - name: Package and generate hashes
         shell: pwsh
         run: |
-          $tag = "${{ env.TAG }}"
-          $distDir = Join-Path $PWD 'dist'
-          $rawExe = Join-Path $distDir "${{ env.APP_NAME }}.exe"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
 
-          if (-not (Test-Path $rawExe)) {
-            throw "Executable not found: $rawExe"
-          }
-
-          $exeName = "${{ env.APP_NAME }}-$tag-${{ env.PLATFORM }}.exe"
-          $packageName = "${{ env.APP_NAME }}-$tag-${{ env.PLATFORM }}.7z"
-          $hashName = "${{ env.APP_NAME }}-$tag-${{ env.PLATFORM }}.sha256"
-
-          $exeOut = Join-Path $distDir $exeName
-          $packageOut = Join-Path $distDir $packageName
-          $hashOut = Join-Path $distDir $hashName
-
-          Copy-Item $rawExe $exeOut -Force
-
-          $exeSize = (Get-Item $exeOut).Length
-          if ($exeSize -lt 1MB) {
-            throw "EXE size too small ($exeSize bytes), build may be invalid"
-          }
-
-          $sevenZip = Get-Command 7z -ErrorAction SilentlyContinue
-          if ($null -ne $sevenZip) {
-            & $sevenZip.Source a -t7z -mx=9 -mmt=on $packageOut $exeOut | Out-Host
-          }
-          else {
-            # 兜底：如果7z不可用，退化为zip
-            $packageName = "${{ env.APP_NAME }}-$tag-${{ env.PLATFORM }}.zip"
-            $packageOut = Join-Path $distDir $packageName
-            Compress-Archive -Path $exeOut -DestinationPath $packageOut -Force
-          }
-
-          $packageHash = (Get-FileHash $packageOut -Algorithm SHA256).Hash.ToLower()
-
-          @(
-            "$packageHash *$packageName"
-          ) | Set-Content -Path $hashOut -Encoding ascii
-
-          "PACKAGE_FILE=$packageName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "HASH_FILE=$hashName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-          Write-Host "✓ Built exe: $exeOut"
-          Write-Host "✓ Packaged: $packageOut"
-          Write-Host "✓ Hash file: $hashOut"
-
-      - name: Validate artifact checksums
+      - name: Build release package
         shell: pwsh
         run: |
-          $hashPath = Join-Path $PWD "dist\${{ env.HASH_FILE }}"
-          if (-not (Test-Path $hashPath)) {
-            throw "Checksum file not found: $hashPath"
-          }
+          powershell -ExecutionPolicy Bypass -File .\build_release.ps1 -Version ${{ steps.version.outputs.version }}
 
-          $lines = Get-Content $hashPath | Where-Object { $_.Trim() -ne '' }
-          if ($lines.Count -lt 1) {
-            throw "Checksum file content invalid: expected >= 1 line"
-          }
-
-          foreach ($line in $lines) {
-            if ($line -notmatch '^[0-9a-f]{64} \*.+$') {
-              throw "Invalid checksum line format: $line"
-            }
-          }
-
-          Write-Host "✓ Checksum format validated"
-
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ env.TAG }}
-          name: Release ${{ env.TAG }}
-          draft: false
-          prerelease: false
+          name: SupplyChain-Reconciler-Plus-${{ steps.version.outputs.version }}-windows
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/*.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: SupplyChain-Reconciler-Plus ${{ steps.version.outputs.version }}
           files: |
-            dist/${{ env.PACKAGE_FILE }}
-            dist/${{ env.HASH_FILE }}
-          body: |
-            # Supply Chain Reconciler Plus ${{ env.TAG }}
-            
-            ## 📦 下载
-            - **${{ env.PACKAGE_FILE }}**: 高压缩安装包（推荐）
-            - **${{ env.HASH_FILE }}**: SHA256 校验文件
-            
-            ## 🚀 使用说明
-            1. 下载并解压
-            2. 双击运行 `${{ env.APP_NAME }}-${{ env.TAG }}-${{ env.PLATFORM }}.exe`
-            
-            ## 🔐 完整性校验
-            可使用 `${{ env.HASH_FILE }}` 对下载文件进行 SHA256 校验。
-            
-            ## ⚠️ 注意事项
-            - 仅支持 Windows 系统
-            - 首次运行时可能需要管理员权限
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            dist/*.exe
+            dist/*.zip
+            dist/*.sha256

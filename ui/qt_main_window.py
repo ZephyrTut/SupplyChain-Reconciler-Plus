@@ -917,17 +917,38 @@ class QtMainWindow(QMainWindow):
 
         self.config_panel.set_manual_unique_values(manual_unique_values)
         self.config_panel.set_system_unique_values(system_unique_values)
+        self._update_auto_map_stats()
 
     def _build_filter_tuples(self, filters: list) -> list:
-        """将配置中的筛选规则转换为引擎可用元组。"""
-        tuples = []
+        """将配置中的筛选规则转换为引擎可用结构（兼容旧tuple格式）。"""
+        items = []
         for f in filters or []:
             column = f.get("column")
             operator = f.get("operator")
             value = f.get("value")
             if column and operator:
-                tuples.append((column, operator, value))
-        return tuples
+                item = {"column": column, "operator": operator, "value": value}
+                if f.get("target_filter"):
+                    item["target_filter"] = f.get("target_filter")
+                items.append(item)
+        return items
+
+    def _format_filter_item(self, item: dict) -> str:
+        """格式化筛选规则用于导出显示。"""
+        col = item.get("column", "")
+        op = item.get("operator", "")
+        val = item.get("value", "")
+        text = f"{col} {op} '{val}'"
+
+        target = item.get("target_filter")
+        if isinstance(target, dict):
+            t_col = target.get("column", "")
+            t_op = target.get("operator", "")
+            t_val = target.get("value", "")
+            if t_col and t_op:
+                text += f" (仅覆盖: {t_col} {t_op} '{t_val}')"
+
+        return text
             
     def _go_prev(self):
         """上一步"""
@@ -995,6 +1016,15 @@ class QtMainWindow(QMainWindow):
             if clean_rules:
                 manual_data = CompareEngine.clean_column(manual_data, clean_rules)
             
+            # 自动映射系统表零件号（仅影响副本）
+            auto_map = config.get("system_auto_map", {})
+            if auto_map.get("enabled"):
+                system_data, _ = CompareEngine.auto_map_system_parts(
+                    system_data,
+                    manual_data,
+                    auto_map
+                )
+
             # 生成主键
             manual_with_key = CompareEngine.make_key(manual_data, manual_key_cols)
             system_with_key = CompareEngine.make_key(system_data, system_key_cols)
@@ -1193,6 +1223,9 @@ class QtMainWindow(QMainWindow):
         old_config = template.get("config", {}) if isinstance(template, dict) else {}
         new_config = self.config_panel.get_config()
 
+        if not self._is_template_writeback_allowed(new_config):
+            return
+
         # 没变化则不写盘
         if new_config == old_config:
             return
@@ -1210,6 +1243,21 @@ class QtMainWindow(QMainWindow):
                 self.template_combo.setCurrentIndex(idx)
         finally:
             self._template_reload_guard = False
+
+    def _is_template_writeback_allowed(self, config: dict) -> bool:
+        """避免用不完整配置覆盖模板。"""
+        if not isinstance(config, dict):
+            return False
+
+        key_mappings = config.get("key_mappings", [])
+        if not key_mappings:
+            return False
+
+        value_mapping = config.get("value_mapping", {})
+        if not value_mapping.get("manual") or not value_mapping.get("system"):
+            return False
+
+        return True
             
     def _save_template(self):
         """保存模板"""
@@ -1277,6 +1325,33 @@ class QtMainWindow(QMainWindow):
             column_letters = self.result_preview.get_column_letters()
             if column_letters:
                 self.config_panel.update_formula_options(column_letters)
+        self._update_auto_map_stats()
+
+    def _update_auto_map_stats(self):
+        if self.manual_df is None or self.system_df is None:
+            self.config_panel.set_auto_map_stats("映射统计: 未导入完整数据")
+            return
+
+        config = self.config_panel.get_config()
+        auto_map = config.get("system_auto_map", {})
+        if not auto_map.get("enabled"):
+            self.config_panel.set_auto_map_stats("映射统计: 未启用")
+            return
+
+        from core.compare_engine import CompareEngine
+        _, stats = CompareEngine.auto_map_system_parts(
+            self.system_df,
+            self.manual_df,
+            auto_map,
+            output_column="__MAPPED_PART__"
+        )
+        text = (
+            f"映射统计: 候选{stats.get('candidates', 0)}行, "
+            f"匹配{stats.get('matched', 0)}行, "
+            f"歧义{stats.get('ambiguous', 0)}行, "
+            f"未匹配{stats.get('unmatched', 0)}行"
+        )
+        self.config_panel.set_auto_map_stats(text)
     
     def _export_manual_preview(self):
         """导出手工表预处理预览（显示清洗和透视计算过程）"""
@@ -1480,6 +1555,24 @@ class QtMainWindow(QMainWindow):
         ws1 = wb.active
         ws1.title = "1-原始数据"
         df_original = self.system_df.copy()
+        df_for_processing = df_original.copy()
+        map_stats_text = "映射统计: 未启用"
+        auto_map = config.get("system_auto_map", {})
+        if auto_map.get("enabled"):
+            if self.manual_df is None:
+                map_stats_text = "映射统计: 未导入手工表"
+            else:
+                df_for_processing, stats = CompareEngine.auto_map_system_parts(
+                    df_for_processing,
+                    self.manual_df,
+                    auto_map
+                )
+                map_stats_text = (
+                    f"映射统计: 候选{stats.get('candidates', 0)}行, "
+                    f"匹配{stats.get('matched', 0)}行, "
+                    f"歧义{stats.get('ambiguous', 0)}行, "
+                    f"未匹配{stats.get('unmatched', 0)}行"
+                )
         
         ws1.cell(row=1, column=1, value="【系统表原始数据】").font = Font(bold=True, size=12, color="2E7D32")
         ws1.cell(row=2, column=1, value=f"共 {len(df_original)} 行数据")
@@ -1499,23 +1592,25 @@ class QtMainWindow(QMainWindow):
         ws2 = wb.create_sheet("2-筛选后数据")
         system_filters = config.get("system_filters", [])
         system_filter_exceptions = config.get("system_filter_exceptions", [])
-        df_filtered = df_original.copy()
+        df_filtered = df_for_processing.copy()
         
         ws2.cell(row=1, column=1, value="【筛选规则】").font = Font(bold=True, size=12, color="FF0000")
         
+        ws2.cell(row=2, column=1, value=map_stats_text)
+
         if system_filters or system_filter_exceptions:
             filter_tuples = self._build_filter_tuples(system_filters)
             exception_tuples = self._build_filter_tuples(system_filter_exceptions)
 
-            for i, (col, op, val) in enumerate(filter_tuples):
-                ws2.cell(row=2 + i, column=1, value=f"规则{i+1}: {col} {op} '{val}'")
+            for i, item in enumerate(filter_tuples):
+                ws2.cell(row=3 + i, column=1, value=f"规则{i+1}: {self._format_filter_item(item)}")
 
             offset = len(filter_tuples)
-            for j, (col, op, val) in enumerate(exception_tuples):
+            for j, item in enumerate(exception_tuples):
                 ws2.cell(
-                    row=2 + offset + j,
+                    row=3 + offset + j,
                     column=1,
-                    value=f"例外{j+1}: {col} {op} '{val}'"
+                    value=f"例外{j+1}: {self._format_filter_item(item)}"
                 )
 
             # 应用筛选条件（主筛选AND + 例外保留OR）
@@ -1525,12 +1620,12 @@ class QtMainWindow(QMainWindow):
                 exception_tuples
             )
             
-            line_count = len(filter_tuples) + len(exception_tuples)
+            line_count = len(filter_tuples) + len(exception_tuples) + 1
             ws2.cell(row=2 + line_count, column=1, value=f"筛选后剩余 {len(df_filtered)} 行")
             start_row = 4 + line_count
         else:
-            ws2.cell(row=2, column=1, value="（无筛选规则）")
-            start_row = 4
+            ws2.cell(row=3, column=1, value="（无筛选规则）")
+            start_row = 6
         
         for c_idx, col in enumerate(df_filtered.columns, 1):
             cell = ws2.cell(row=start_row, column=c_idx, value=col)

@@ -49,9 +49,10 @@ def clean_column(
 ```python
 {
     "column": str,      # 目标列名
-    "mode": str,        # "删除匹配" | "保留匹配" | "替换为"
-    "regexes": List[str], # 正则表达式列表
-    "replace": str      # 替换值（仅替换模式使用）
+    "mode": str,        # "去中文保留关键词" | "删除匹配" | "保留匹配" | "替换为"
+    "regexes": List[str], # 正则表达式列表（兼容旧格式）
+    "replace": str,     # 替换值（仅替换模式使用）
+    "keywords": List[str] # 关键词列表（去中文保留关键词模式）
 }
 ```
 
@@ -107,6 +108,9 @@ def apply_filters(
 $$
 最终结果 = 主筛选(AND) \lor 例外保留(OR)
 $$
+
+可选：例外保留可绑定到特定筛选条件（仅绕过指定条件）。
+配置字段：`target_filter = {"column": ..., "operator": ..., "value": ...}`
 ```
 
 **操作符映射**:
@@ -163,6 +167,56 @@ def make_key(
 df = CompareEngine.make_key(df, ["订单编号", "物料编码"])
 # 结果: 新增 __KEY__ 列，值为 "订单编号_物料编码"
 ```
+
+---
+
+### auto_map_system_parts()
+
+**系统零件号自动映射**
+
+```python
+@staticmethod
+def auto_map_system_parts(
+    system_df: pd.DataFrame,
+    manual_df: pd.DataFrame,
+    config: Optional[dict] = None,
+    output_column: Optional[str] = None
+) -> Tuple[pd.DataFrame, Dict[str, int]]:
+```
+
+**用途**:
+
+将系统表中以 `-000` 结尾的零件号，根据手工表对应后缀自动替换。
+
+**配置格式**:
+
+```python
+config = {
+    "enabled": True,
+    "system": {
+        "supplier_col": "供应商",
+        "order_col": "订单号",
+        "part_col": "零件号"
+    },
+    "manual": {
+        "supplier_col": "供应商",
+        "order_col": "订单号",
+        "part_col": "零件号"
+    },
+    "suffixes": ["-001", "-002"]
+}
+```
+
+**返回**:
+
+- 映射后的 system_df（默认原列替换）
+- 统计信息：`candidates` / `matched` / `ambiguous` / `unmatched`
+
+**说明**:
+
+- 若 `output_column` 提供，则映射结果写入新列，原列不变
+- 同一键匹配到多个后缀时视为歧义，不替换
+- 未匹配到后缀时保持原值
 
 ---
 

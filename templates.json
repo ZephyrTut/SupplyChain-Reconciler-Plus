@@ -44,38 +44,64 @@
         {
           "column": "库存地点名称",
           "operator": "NOT_IN_LIST",
-          "value": "途佳仓(9011),电池武义三厂原材料库一仓(6129),电池武义三厂原材料库二仓(6131),杭州长安民生(9001),二厂民生中晟RDC仓(9026),电池湖州原材料库一仓(6138),途佳武义仓(9012),电池湖州原材料库二仓(6139),凌昇湖州电驱原材料库(6144),凌昇湖州压缩机原材料库(6134),电子湖州原材料库(6141),电池湖州试制原材料库(6140),凌昇湖州压缩机试制原材料库(6135),凌昇湖州电驱试制原材料库(6145),电池武义三厂试制原材料库(6130)"
-        }
-      ],
-      "system_filter_exceptions": [
+          "value": "二厂民生中晟RDC仓(9026),杭州长安民生(9001),途佳仓(9011)"
+        },
         {
-          "column": "供应商名称",
-          "operator": "EQUALS",
-          "value": "上海为鼎电子科技有限公司"
+          "column": "备注",
+          "operator": "NOT_IN_LIST",
+          "value": "(空白),C"
         }
       ],
+      "system_filter_exceptions": [],
+      "system_auto_map": {
+        "enabled": true,
+        "system": {
+          "supplier_col": "供应商名称",
+          "order_col": "送货单号",
+          "part_col": "物料编码"
+        },
+        "manual": {
+          "supplier_col": "供应商名称",
+          "order_col": "备注",
+          "part_col": "零件代码"
+        },
+        "suffixes": [
+          "-001"
+        ]
+      },
       "clean_rules": [
         {
           "column": "备注",
-          "mode": "删除匹配",
-          "preset": "只留数字 + 去空格",
-          "regexes": [
-            "[^\\d]+",
-            "^\\s+|\\s+$"
-          ]
+          "mode": "去中文保留关键词",
+          "keywords": []
         }
       ],
+      "manual_pivot": {
+        "pivot_column": "事务类型",
+        "out_values": [
+          "发货",
+          "退货"
+        ],
+        "in_values": [
+          "退仓"
+        ]
+      },
       "pivot_column": {
         "system": "送货单行状态"
       },
       "pivot_values": [
+        "送货中",
+        "已到货",
         "已入库",
+        "已关闭",
         "部分入库(完结)",
-        "部分入库"
+        "已质检",
+        "部分入库",
+        "全部退货"
       ],
-      "difference_formula": "F - E"
+      "difference_formula": "K - (J -D )"
     },
-    "timestamp": "2026-03-16 15:26:43"
+    "timestamp": "2026-05-01 22:55:55"
   },
   {
     "id": "5212b177-4207-4337-bcb4-f25077a5e8a7",
@@ -116,37 +142,59 @@
       "manual_filters": [
         {
           "column": "事务类型",
-          "operator": "IN_LIST",
-          "value": "发货"
+          "operator": "CONTAINS",
+          "value": "发货，退货，退仓"
         }
       ],
       "manual_filter_exceptions": [],
       "system_filters": [],
       "system_filter_exceptions": [],
+      "system_auto_map": {
+        "enabled": true,
+        "system": {
+          "supplier_col": "供应商",
+          "order_col": "排序单号",
+          "part_col": "零件号"
+        },
+        "manual": {
+          "supplier_col": "供应商名称",
+          "order_col": "备注",
+          "part_col": "零件代码"
+        },
+        "suffixes": [
+          "-001"
+        ]
+      },
       "clean_rules": [
         {
           "column": "备注",
-          "mode": "删除匹配",
-          "preset": "去中文 + 去空格",
-          "regexes": [
-            "[\\u4e00-\\u9fa5]+",
-            "^\\s+|\\s+$"
+          "mode": "去中文保留关键词",
+          "keywords": [
+            "换单",
+            "补单"
           ]
         }
       ],
+      "manual_pivot": {
+        "pivot_column": "事务类型",
+        "out_values": [
+          "发货",
+          "退货"
+        ],
+        "in_values": [
+          "退仓"
+        ]
+      },
       "pivot_column": {
         "system": "任务状态"
       },
       "pivot_values": [
-        "发布",
-        "已质检",
         "完成",
-        "关闭",
-        "补货下架"
+        "关闭"
       ],
-      "difference_formula": "G - F"
+      "difference_formula": "E - (D - B)"
     },
-    "timestamp": "2026-03-16 18:09:49"
+    "timestamp": "2026-05-01 23:02:38"
   },
   {
     "id": "9d14522b-b010-415f-a764-e8c7aceff447",
@@ -169,24 +217,49 @@
       "manual_filters": [
         {
           "column": "事务类型",
-          "operator": "IN_LIST",
-          "value": "发货"
+          "operator": "CONTAINS",
+          "value": "发货，退货，退仓"
         }
       ],
       "manual_filter_exceptions": [],
       "system_filters": [],
       "system_filter_exceptions": [],
+      "system_auto_map": {
+        "enabled": false,
+        "system": {
+          "supplier_col": "(供应商列)",
+          "order_col": "(单号列)",
+          "part_col": "(零件号列)"
+        },
+        "manual": {
+          "supplier_col": "(供应商列)",
+          "order_col": "(单号列)",
+          "part_col": "(零件号列)"
+        },
+        "suffixes": [
+          "-001"
+        ]
+      },
       "clean_rules": [
         {
           "column": "备注",
-          "mode": "删除匹配",
-          "preset": "去中文 + 去空格",
-          "regexes": [
-            "[\\u4e00-\\u9fa5]+",
-            "^\\s+|\\s+$"
+          "mode": "去中文保留关键词",
+          "keywords": [
+            "换单",
+            "补单"
           ]
         }
       ],
+      "manual_pivot": {
+        "pivot_column": "事务类型",
+        "out_values": [
+          "发货",
+          "退货"
+        ],
+        "in_values": [
+          "退仓"
+        ]
+      },
       "pivot_column": {
         "system": "任务状态"
       },
@@ -194,11 +267,10 @@
         "发布",
         "已质检",
         "完成",
-        "关闭",
-        "补货下架"
+        "关闭"
       ],
-      "difference_formula": "H - (G - B)"
+      "difference_formula": "G - (F - B)"
     },
-    "timestamp": "2026-03-16 18:10:38"
+    "timestamp": "2026-05-01 23:39:06"
   }
 ]

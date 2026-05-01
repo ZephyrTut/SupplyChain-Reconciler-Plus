@@ -122,3 +122,7 @@ Thumbs.db
 .history
 
 test 
+
+# local spreadsheet fixtures generated during manual testing
+tests/*.xls
+tests/*.xlsx

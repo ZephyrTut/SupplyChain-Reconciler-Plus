@@ -535,6 +535,9 @@ class QtResultPreview(QWidget):
                        config: Dict[str, Any]):
         """更新预览 - 实时执行对账并显示结果预览"""
         try:
+            if not config:
+                self.status_label.setText("请先完成配置")
+                return
             # 获取配置
             key_mappings = config.get("key_mappings", [])
             value_mapping = config.get("value_mapping", {})
@@ -566,9 +569,19 @@ class QtResultPreview(QWidget):
             if clean_rules:
                 manual_df_cleaned = CompareEngine.clean_column(manual_df_cleaned, clean_rules)
             
+            # 自动映射系统表零件号（仅影响副本）
+            system_df_for_key = system_df.copy()
+            auto_map = config.get("system_auto_map", {})
+            if auto_map.get("enabled"):
+                system_df_for_key, _ = CompareEngine.auto_map_system_parts(
+                    system_df_for_key,
+                    manual_df_cleaned,
+                    auto_map
+                )
+
             # 生成主键（使用清洗后的数据）
             manual_with_key = CompareEngine.make_key(manual_df_cleaned, manual_keys)
-            system_with_key = CompareEngine.make_key(system_df.copy(), system_keys)
+            system_with_key = CompareEngine.make_key(system_df_for_key, system_keys)
             
             # 准备筛选条件
             manual_filters = [(f["column"], f["operator"], f["value"]) 
